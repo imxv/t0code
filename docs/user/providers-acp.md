@@ -39,6 +39,9 @@ credentials and skills remain managed by the installed agent or its wrapper. Mod
 options come from ACP, including model IDs that contain JSON. T3 Code launches the executable directly
 without expanding shell expressions.
 
+On desktop and web, choose **Oh My Pi (OMP)** in **Add provider** to configure an installed
+OMP using `omp acp`. If OMP is outside the environment's PATH, enter its full executable path.
+
 ## Where agents run
 
 Registry agents always run on the machine that hosts your T3 Code server. That stays true when you

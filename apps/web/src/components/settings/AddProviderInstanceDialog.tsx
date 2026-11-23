@@ -76,6 +76,8 @@ const DRIVER_OPTIONS = providerClients.definitions.filter(
 const FEATURED_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured !== false);
 const MORE_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured === false);
 const EMPTY_CONFIG_DRAFT: Record<string, unknown> = {};
+const OMP_NAME = "Oh My Pi (OMP)";
+
 function validateInstanceId(
   id: string,
   existing: ReadonlySet<string>,
@@ -361,22 +363,27 @@ export function AddProviderInstanceDialog({
     setHasAttemptedSubmit(false);
   };
 
-  const handleLocalAcpConfiguration = () => {
+  const handleLocalAcpConfiguration = (useOmpPreset: boolean) => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => ({
       ...existing,
-      [ACP_REGISTRY_DRIVER_KIND]: { source: "local", commandArgs: [] },
+      [ACP_REGISTRY_DRIVER_KIND]: {
+        source: "local",
+        commandArgs: useOmpPreset ? ["acp"] : [],
+        ...(useOmpPreset ? { commandPath: "omp" } : {}),
+      },
     }));
     setIdentityByDriver((existing) =>
       updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
-        label: gt("Local ACP"),
+        label: useOmpPreset ? OMP_NAME : gt("Local ACP"),
         instanceIdOverride: null,
       }),
     );
     setLocalEnvironment([]);
     setHasAttemptedSubmit(false);
+    setShowMoreProviders(true);
   };
 
   // A policy that owns this driver's launch settings also rules out ChatGPT's own runtime.
@@ -505,6 +512,19 @@ export function AddProviderInstanceDialog({
                   onValueChange={selectDriver}
                   aria-labelledby="add-instance-driver-label"
                 />
+                {acpRegistryAllowed ? (
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!canManageProviders || isPreparingRegistryAgent}
+                      onClick={() => handleLocalAcpConfiguration(true)}
+                    >
+                      {OMP_NAME}
+                    </Button>
+                  </div>
+                ) : null}
                 <MultipleAccountsNote environmentId={environmentId} driver={driver} />
               </div>
 
@@ -596,7 +616,7 @@ export function AddProviderInstanceDialog({
                             providerInstances={settings.providerInstances}
                             onPrepared={handleAcpPrepared}
                             onManualConfiguration={handleManualAcpConfiguration}
-                            onLocalConfiguration={handleLocalAcpConfiguration}
+                            onLocalConfiguration={() => handleLocalAcpConfiguration(false)}
                           />
                           {isAcpRegistry && hasAttemptedSubmit && acpSelectionError ? (
                             <p className="mt-2 text-2xs text-destructive">{acpSelectionError}</p>
