@@ -13,6 +13,23 @@ const AcpRegistryAgentId = TrimmedNonEmptyString.check(
 const ACP_REGISTRY_CDN_HOSTNAME = "cdn.agentclientprotocol.com";
 const ACP_REGISTRY_AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
+export const OMP_ACP_ICON_URL = "https://omp.sh/favicon.svg";
+export const OMP_ACP_NAME = "Oh My Pi (OMP)";
+
+export function isOmpAcpCommand(config: unknown): boolean {
+  if (!config || typeof config !== "object") return false;
+  return (
+    "source" in config &&
+    config.source === "local" &&
+    "commandPath" in config &&
+    typeof config.commandPath === "string" &&
+    /(?:^|[\\/])omp(?:\.exe|\.cmd)?$/i.test(config.commandPath.trim()) &&
+    "commandArgs" in config &&
+    Array.isArray(config.commandArgs) &&
+    config.commandArgs[0] === "acp"
+  );
+}
+
 export function officialAcpRegistryIconUrlForAgentId(
   agentId: string | null | undefined,
 ): string | null {
@@ -24,6 +41,7 @@ export function officialAcpRegistryIconUrlForAgentId(
 
 export function resolveOfficialAcpRegistryIconUrl(icon: string | null | undefined): string | null {
   if (!icon) return null;
+  if (icon === OMP_ACP_ICON_URL) return icon;
   try {
     const url = new URL(icon);
     if (

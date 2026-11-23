@@ -41,6 +41,9 @@ without expanding shell expressions.
 
 On desktop and web, choose **Oh My Pi (OMP)** in **Add provider** to configure an installed
 OMP using `omp acp`. If OMP is outside the environment's PATH, enter its full executable path.
+The provider card shows available updates and can run the installation's updater. The standalone
+install in `~/.local/bin` checks OMP's configured release channel. For installs T3 Code cannot
+identify, use the package manager or installer that owns the binary.
 
 ## Where agents run
 

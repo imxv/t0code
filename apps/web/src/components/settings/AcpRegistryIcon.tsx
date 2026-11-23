@@ -5,7 +5,9 @@ import { useId, useState } from "react";
 import {
   resolveOfficialAcpRegistryIconUrl,
   officialAcpRegistryIconUrlForAgentId,
+  OMP_ACP_ICON_URL,
 } from "@t3tools/contracts";
+import ompIcon from "../../assets/omp.svg";
 
 import { cn } from "../../lib/utils";
 import { ACPRegistryIcon } from "../Icons";
@@ -106,7 +108,8 @@ export function AcpRegistryAgentIcon({
   readonly fallbackClassName?: string;
 }) {
   const colorFilterId = useId();
-  const iconUrl = resolveOfficialAcpRegistryIconUrl(icon);
+  const isOmp = icon === OMP_ACP_ICON_URL;
+  const iconUrl = isOmp ? null : resolveOfficialAcpRegistryIconUrl(icon);
   // Render only after the load pipeline resolves, so the fallback icon does
   // not flash a broken image.
   const source = AsyncResult.getOrElse(
@@ -118,6 +121,10 @@ export function AcpRegistryAgentIcon({
     readonly status: "loaded" | "failed";
   } | null>(null);
   const status = source !== null && image?.source === source ? image.status : "loading";
+
+  if (isOmp) {
+    return <img alt="" src={ompIcon} className={cn("size-8 shrink-0", className)} />;
+  }
 
   return (
     <span

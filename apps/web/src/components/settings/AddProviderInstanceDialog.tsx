@@ -16,6 +16,9 @@ import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
 import {
   type AcpRegistrySearchAgent,
   AuthProvidersManageScope,
+  isOmpAcpCommand,
+  OMP_ACP_ICON_URL,
+  OMP_ACP_NAME,
   ProviderInstanceId,
   ProviderDriverKind,
   type EnvironmentId,
@@ -76,7 +79,17 @@ const DRIVER_OPTIONS = providerClients.definitions.filter(
 const FEATURED_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured !== false);
 const MORE_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured === false);
 const EMPTY_CONFIG_DRAFT: Record<string, unknown> = {};
-const OMP_NAME = "Oh My Pi (OMP)";
+const OMP_OPTION = {
+  driverKind: ACP_REGISTRY_DRIVER_KIND,
+  value: "omp",
+  label: OMP_ACP_NAME,
+  iconUrl: OMP_ACP_ICON_URL,
+};
+
+type ProviderOption = Pick<ProviderClientDefinition, "driverKind" | "label" | "badgeLabel"> & {
+  readonly value?: string;
+  readonly iconUrl?: string;
+};
 
 function validateInstanceId(
   id: string,
@@ -101,8 +114,8 @@ function ProviderOptionGrid({
   onValueChange,
   ...labelProps
 }: {
-  readonly options: ReadonlyArray<ProviderClientDefinition>;
-  readonly value: ProviderDriverKind;
+  readonly options: ReadonlyArray<ProviderOption>;
+  readonly value: string;
   readonly disabled: boolean;
   readonly onValueChange: (value: string) => void;
   readonly "aria-label"?: string;
@@ -118,13 +131,14 @@ function ProviderOptionGrid({
     >
       {options.map((option) => (
         <RadioPrimitive.Root
-          key={option.driverKind}
-          value={option.driverKind}
+          key={option.value ?? option.driverKind}
+          value={option.value ?? option.driverKind}
           className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
         >
           <ProviderInstanceIcon
             driverKind={option.driverKind}
             displayName={option.label}
+            acpRegistryIconUrl={option.iconUrl}
             iconClassName="size-4"
           />
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -246,6 +260,7 @@ export function AddProviderInstanceDialog({
 
   const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
   const isLocalAcp = isAcpRegistry && isManualAcpConfiguration && configDraft.source === "local";
+  const isOmp = isLocalAcp && isOmpAcpCommand(configDraft);
   const localCommandPath =
     typeof configDraft.commandPath === "string" ? configDraft.commandPath.trim() : "";
   const manualAgentId = typeof configDraft.agentId === "string" ? configDraft.agentId.trim() : "";
@@ -258,7 +273,11 @@ export function AddProviderInstanceDialog({
       : gt("Select an ACP or configure one manually.");
   const wizardStepSummaries = isAcpRegistry
     ? ([
-        isLocalAcp ? gt("Local ACP command") : (selectedAcp?.name ?? (manualAgentId || null)),
+        isOmp
+          ? OMP_ACP_NAME
+          : isLocalAcp
+            ? gt("Local ACP command")
+            : (selectedAcp?.name ?? (manualAgentId || null)),
         previewLabel,
         null,
       ] as const)
@@ -275,6 +294,10 @@ export function AddProviderInstanceDialog({
     });
   };
   const selectDriver = (value: string) => {
+    if (value === OMP_OPTION.value) {
+      handleLocalAcpConfiguration(true);
+      return;
+    }
     setDriver(ProviderDriverKind.make(value));
     setIsManualAcpConfiguration(false);
     setHasAttemptedSubmit(false);
@@ -377,7 +400,7 @@ export function AddProviderInstanceDialog({
     }));
     setIdentityByDriver((existing) =>
       updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
-        label: useOmpPreset ? OMP_NAME : gt("Local ACP"),
+        label: useOmpPreset ? OMP_ACP_NAME : gt("Local ACP"),
         instanceIdOverride: null,
       }),
     );
@@ -506,25 +529,16 @@ export function AddProviderInstanceDialog({
                   {gt("Provider", { $context: "wizard step" })}
                 </div>
                 <ProviderOptionGrid
-                  options={featuredDriverOptions}
-                  value={driver}
+                  options={
+                    acpRegistryAllowed
+                      ? [...featuredDriverOptions, OMP_OPTION]
+                      : featuredDriverOptions
+                  }
+                  value={isOmp ? OMP_OPTION.value : driver}
                   disabled={isPreparingRegistryAgent}
                   onValueChange={selectDriver}
                   aria-labelledby="add-instance-driver-label"
                 />
-                {acpRegistryAllowed ? (
-                  <div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={!canManageProviders || isPreparingRegistryAgent}
-                      onClick={() => handleLocalAcpConfiguration(true)}
-                    >
-                      {OMP_NAME}
-                    </Button>
-                  </div>
-                ) : null}
                 <MultipleAccountsNote environmentId={environmentId} driver={driver} />
               </div>
 

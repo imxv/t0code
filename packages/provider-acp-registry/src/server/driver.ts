@@ -1,4 +1,6 @@
 import {
+  isOmpAcpCommand,
+  OMP_ACP_ICON_URL,
   officialAcpRegistryIconUrlForAgentId,
   ProviderDriverKind,
   resolveOfficialAcpRegistryIconUrl,
@@ -26,8 +28,10 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as HttpClient from "effect/http/HttpClient";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { AcpRegistryAdapterV2Driver, type AcpRegistryAdapterV2DriverEnv } from "./adapter.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
@@ -42,7 +46,12 @@ import {
   providerModelsFromSettings,
   providerProbeEnvironment,
 } from "@t3tools/provider-core/server/snapshotProbe";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
+import {
+  enrichProviderSnapshotWithVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
+  makeManualOnlyProviderMaintenanceCapabilities,
+  resolveProviderMaintenanceCapabilitiesEffect,
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
@@ -65,6 +74,7 @@ import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
 import * as AcpRegistryAuthenticationState from "./authenticationState.ts";
+import { checkOmpInstalledVersion, ompMaintenance } from "./ompMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
@@ -293,7 +303,9 @@ function baseSnapshot(
 ): ServerProvider {
   const iconUrl =
     input.settings.source === "local"
-      ? null
+      ? isOmpAcpCommand(input.settings)
+        ? OMP_ACP_ICON_URL
+        : null
       : (resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
         officialAcpRegistryIconUrlForAgentId(input.settings.agentId));
   return {
@@ -603,6 +615,8 @@ export const checkAcpRegistryProviderReadiness = Effect.fn(
 export type AcpRegistryDriverEnv =
   | AcpRegistryAdapterV2DriverEnv
   | Digest.Digest
+  | HttpClient.HttpClient
+  | ProviderLatestVersions.ProviderLatestVersions
   | ProviderHost.ProviderHost;
 
 export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryDriverEnv> = {
@@ -637,6 +651,8 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     }
     const random = yield* SecureRandom.SecureRandom;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const httpClient = yield* HttpClient.HttpClient;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const hostEnvironment = yield* HostProcess.Environment;
@@ -655,6 +671,22 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     const processEnvironment = yield* mergeProviderInstanceEnvironment(
       environment,
       hostEnvironment,
+    );
+    const ompPath =
+      effectiveConfig.source === "local" && isOmpAcpCommand(effectiveConfig)
+        ? effectiveConfig.commandPath
+        : null;
+    const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+      ompPath === null
+        ? Effect.succeed(MAINTENANCE)
+        : resolveProviderMaintenanceCapabilitiesEffect(ompMaintenance, {
+            binaryPath: ompPath,
+            env: processEnvironment,
+          }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          ),
     );
     const orchestrationAdapter = yield* AcpRegistryAdapterV2Driver.create({
       instanceId,
@@ -749,6 +781,15 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
           ),
         ),
       ),
+      Effect.flatMap(
+        Effect.fnUntraced(function* (provider) {
+          if (ompPath === null || !provider.installed) return provider;
+          const version = yield* checkOmpInstalledVersion(ompPath, processEnvironment).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          );
+          return version === null ? provider : { ...provider, version, installedVersion: version };
+        }),
+      ),
       Effect.flatMap(withLiveRuntimeState),
     );
     const enrichProvider = checkAcpRegistryProviderStatus(
@@ -817,7 +858,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     const snapshot = yield* makeManagedServerProvider<
       ProviderSnapshotSettings<AcpRegistrySettings>
     >({
-      resolveMaintenance: () => Effect.succeed(MAINTENANCE),
+      resolveMaintenance,
       getSettings: snapshotSettings.getSettings,
       streamSettings: snapshotSettings.streamSettings,
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
@@ -826,10 +867,33 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
       checkProvider,
       enrichSnapshot: Effect.fn("enrichSnapshot")(function ({
         snapshot,
+        settings,
         getSnapshot,
         publishSnapshot,
       }) {
         if (!snapshot.installed) return Effect.void;
+        const publishVersionAdvisory =
+          ompPath === null
+            ? Effect.void
+            : resolveMaintenance().pipe(
+                Effect.flatMap((maintenance) =>
+                  enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenance, {
+                    enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+                  }),
+                ),
+                Effect.provideService(HttpClient.HttpClient, httpClient),
+                Effect.provideService(
+                  ProviderLatestVersions.ProviderLatestVersions,
+                  latestVersions,
+                ),
+                Effect.flatMap(({ versionAdvisory }) =>
+                  liveSnapshotSemaphore.withPermit(
+                    getSnapshot.pipe(
+                      Effect.flatMap((current) => publishSnapshot({ ...current, versionAdvisory })),
+                    ),
+                  ),
+                ),
+              );
         const publishEnrichment = (
           Option.isSome(runtimeCoordinator)
             ? runtimeCoordinator.value.runBackgroundProbe(
@@ -848,7 +912,23 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
                   Ref.get(enrichmentCache).pipe(
                     Effect.flatMap((current) =>
                       current.generation === generation
-                        ? withLiveRuntimeState(provider).pipe(Effect.flatMap(publishSnapshot))
+                        ? withLiveRuntimeState(provider).pipe(
+                            Effect.flatMap((enriched) =>
+                              getSnapshot.pipe(
+                                Effect.flatMap((current) =>
+                                  publishSnapshot({
+                                    ...enriched,
+                                    ...(current.installedVersion === undefined
+                                      ? {}
+                                      : { installedVersion: current.installedVersion }),
+                                    ...(current.versionAdvisory === undefined
+                                      ? {}
+                                      : { versionAdvisory: current.versionAdvisory }),
+                                  }),
+                                ),
+                              ),
+                            ),
+                          )
                         : Effect.void,
                     ),
                   ),
@@ -856,7 +936,12 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
             }),
           ),
         );
-        if (Option.isNone(runtimeCoordinator)) return publishEnrichment;
+        if (Option.isNone(runtimeCoordinator)) {
+          return Effect.all([publishEnrichment, publishVersionAdvisory], {
+            concurrency: "unbounded",
+            discard: true,
+          });
+        }
 
         const publishLiveCommands = runtimeCoordinator.value.watchAvailableCommands(
           instanceId,
@@ -911,7 +996,13 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
             ),
         );
         return Effect.all(
-          [publishEnrichment, publishLiveCommands, publishLiveConfiguration, publishUrlAuthAction],
+          [
+            publishEnrichment,
+            publishVersionAdvisory,
+            publishLiveCommands,
+            publishLiveConfiguration,
+            publishUrlAuthAction,
+          ],
           {
             concurrency: "unbounded",
             discard: true,

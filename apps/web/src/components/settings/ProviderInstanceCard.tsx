@@ -50,7 +50,12 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
 import { ManagedControl, ManagedNotice } from "../ManagedPolicy";
 import { managedInstanceLocks, useManagedPolicy } from "../../state/managedPolicy";
-import { disallowedProviderMessage, isManagedDriverAllowed } from "@t3tools/contracts";
+import {
+  disallowedProviderMessage,
+  isManagedDriverAllowed,
+  isOmpAcpCommand,
+  OMP_ACP_ICON_URL,
+} from "@t3tools/contracts";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type {
@@ -994,9 +999,11 @@ export function ProviderInstanceCard({
           : (readConfigString(instance.config, "agentId") ?? undefined)
       }
       acpRegistryIconUrl={
-        readConfigString(instance.config, "source") === "local"
-          ? undefined
-          : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
+        isOmpAcpCommand(instance.config)
+          ? OMP_ACP_ICON_URL
+          : readConfigString(instance.config, "source") === "local"
+            ? undefined
+            : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
       }
       showBadge={Boolean(accentColor)}
       className="size-5"

@@ -8,7 +8,11 @@ import {
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import { invalidateLatestProviderVersion } from "@t3tools/provider-core/server/maintenanceResolver";
+import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { toCustomModelSetting } from "@t3tools/shared/model";
 import { AcpRegistrySettings } from "../settings.ts";
 import { describe, expect, it } from "@effect/vitest";
@@ -20,6 +24,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as ChildProcess from "effect/process/ChildProcess";
 
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
@@ -953,6 +959,8 @@ const driverLayer = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
   Layer.provideMerge(AcpRegistryRuntimeCoordinator.layer),
   Layer.provideMerge(IdAllocator.layer),
   Layer.provideMerge(McpProviderSessions.layer),
+  Layer.provideMerge(ProviderLatestVersions.layer),
+  Layer.provideMerge(FetchHttpClient.layer),
   Layer.provideMerge(
     Layer.succeed(
       ProviderEventLoggers.ProviderEventLoggers,
@@ -963,6 +971,91 @@ const driverLayer = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
 );
 
 it.layer(driverLayer, { excludeTestServices: true })("AcpRegistryDriver", (it) => {
+  it.effect("checks and updates the standalone OMP executable", () =>
+    Effect.gen(function* () {
+      if ((yield* HostProcess.Platform) === "win32") return;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-omp-" });
+      const binDir = path.join(directory, ".local", "bin");
+      const binary = path.join(binDir, "omp");
+      const versionFile = path.join(directory, "version");
+      const agentPath = path.join(directory, "agent.mjs");
+      const modelsPath = path.join(directory, "models.json");
+      yield* fs.makeDirectory(binDir, { recursive: true });
+      yield* fs.writeFileString(versionFile, "19.0.1");
+      yield* fs.writeFileString(agentPath, fakeAgentSource);
+      yield* fs.writeFileString(modelsPath, JSON.stringify(["omp-model"]));
+      yield* fs.writeFileString(
+        binary,
+        `#!${process.execPath}
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const versionFile = ${JSON.stringify(versionFile)};
+          const version = readFileSync(versionFile, "utf8");
+          if (process.argv[2] === "--version") console.log("omp/" + version);
+          if (process.argv[2] === "update") {
+            if (process.argv[3] === "--check") {
+              console.log("Current version: " + version);
+              console.log(version === "19.0.1" ? "New version available: 19.1.1" : "✔ Already up to date");
+            } else writeFileSync(versionFile, "19.1.1");
+          }
+        `,
+      );
+      yield* fs.chmod(binary, 0o755);
+      const instance = yield* AcpRegistryDriver.create({
+        instanceId: ProviderInstanceId.make("omp"),
+        displayName: "Oh My Pi (OMP)",
+        enabled: true,
+        environment: [],
+        config: decodeSettings({ source: "local", commandPath: binary, commandArgs: ["acp"] }),
+      }).pipe(
+        Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, {
+          ...catalogWithInspection({
+            status: "ready",
+            agentId: "local",
+            distribution: "local",
+            version: null,
+          }),
+          resolve: () =>
+            Effect.succeed({
+              distribution: "local" as const,
+              spawn: { command: process.execPath, args: [agentPath, modelsPath] },
+            }),
+        }),
+      );
+      const waitForVersion = (status: "behind_latest" | "current") =>
+        instance.snapshot.streamChanges.pipe(
+          Stream.filter((provider) => provider.versionAdvisory?.status === status),
+          Stream.runHead,
+          Effect.forkScoped({ startImmediately: true }),
+        );
+      const available = yield* waitForVersion("behind_latest");
+      yield* instance.snapshot.refresh;
+      expect(Option.getOrThrow(yield* Fiber.join(available)).versionAdvisory).toMatchObject({
+        currentVersion: "19.0.1",
+        latestVersion: "19.1.1",
+        canUpdate: true,
+      });
+      const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
+      const update = maintenance.update;
+      if (!update) return yield* Effect.die("expected an OMP update command");
+      expect(update).toMatchObject({ executable: binary, args: ["update"] });
+      expect(update.env?.PATH?.split(":")[0]).toBe(binDir);
+      const updated = yield* spawnAndCollect(
+        update.executable,
+        ChildProcess.make(update.executable, update.args, { env: update.env }),
+      );
+      expect(updated.code).toBe(0);
+      yield* invalidateLatestProviderVersion(maintenance);
+      const current = yield* waitForVersion("current");
+      yield* instance.snapshot.refresh;
+      expect(Option.getOrThrow(yield* Fiber.join(current)).versionAdvisory).toMatchObject({
+        currentVersion: "19.1.1",
+        latestVersion: "19.1.1",
+      });
+    }),
+  );
+
   it.effect("creates without inspecting the agent, which may fetch the registry", () =>
     Effect.gen(function* () {
       const instance = yield* AcpRegistryDriver.create({
