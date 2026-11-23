@@ -266,6 +266,10 @@ import {
   scrollCommandPaletteRowIntoView,
 } from "./CommandPaletteResults";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import {
+  MultiRepositoryProjectDialog,
+  type MultiRepositoryProjectTarget,
+} from "./MultiRepositoryProjectDialog";
 import { Checkbox } from "./ui/checkbox";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
@@ -332,6 +336,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useCommandPaletteMount();
   const state = useCommandPaletteStore();
   const setOpen = (open: boolean) => dispatchCommandPalette({ _tag: "SetOpen", open });
+  const [multiRepositoryTarget, setMultiRepositoryTarget] =
+    useState<MultiRepositoryProjectTarget | null>(null);
+  const openMultiRepositoryProject = (target: MultiRepositoryProjectTarget) => {
+    setOpen(false);
+    setMultiRepositoryTarget(target);
+  };
   const openChildSearch = (mode: "files" | "content", context: CommandPaletteReturnContext) =>
     dispatchCommandPalette({ _tag: "OpenChildSearch", mode, context });
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
@@ -359,9 +369,16 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openIntent={state.openIntent}
           setOpen={setOpen}
           openChildSearch={openChildSearch}
+          openMultiRepositoryProject={openMultiRepositoryProject}
           initialContext={state.restoredSearch}
         />
       </CommandDialog>
+      {multiRepositoryTarget ? (
+        <MultiRepositoryProjectDialog
+          target={multiRepositoryTarget}
+          onClose={() => setMultiRepositoryTarget(null)}
+        />
+      ) : null}
     </ComposerHandleContext>
   );
 }
@@ -371,6 +388,7 @@ function CommandPaletteDialog(props: {
   readonly session: number;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
+  readonly openMultiRepositoryProject: (target: MultiRepositoryProjectTarget) => void;
   readonly openChildSearch: (
     mode: "files" | "content",
     context: CommandPaletteReturnContext,
@@ -417,6 +435,7 @@ function CommandPaletteDialog(props: {
           openIntent={props.openIntent}
           setOpen={props.setOpen}
           openChildSearch={props.openChildSearch}
+          openMultiRepositoryProject={props.openMultiRepositoryProject}
           initialContext={props.initialContext}
         />
       )}
@@ -427,6 +446,7 @@ function CommandPaletteDialog(props: {
 function OpenCommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
+  readonly openMultiRepositoryProject: (target: MultiRepositoryProjectTarget) => void;
   readonly openChildSearch: (
     mode: "files" | "content",
     context: CommandPaletteReturnContext,
@@ -1090,6 +1110,30 @@ function OpenCommandPaletteDialog(props: {
     void navigate({ to: "/settings/source-control" });
   };
 
+  const buildMultiRepositoryProjectItem = (
+    environmentId: EnvironmentId,
+    initialName = "",
+  ): CommandPaletteActionItem => ({
+    kind: "action",
+    value: `action:add-project:${environmentId}:multiple`,
+    searchTerms: ["multi repository", "workspace", "folders", "multi repo", "多仓", "多选"],
+    title: gt("Multi-repository project"),
+    description: gt("Choose several folders for one project"),
+    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+    keepOpen: true,
+    run: async () => {
+      const environment = environments.find((entry) => entry.environmentId === environmentId);
+      props.openMultiRepositoryProject({
+        environmentId,
+        environmentLabel: environmentLabelById.get(environmentId) ?? gt("Environment"),
+        platform: getEnvironmentBrowsePlatform(environment?.serverConfig?.environment.platform.os),
+        initialPath: getAddProjectInitialQueryForEnvironment(environmentId),
+        initialName,
+        cwd: getBrowseCwdForEnvironment(environmentId),
+      });
+    },
+  });
+
   const buildAddProjectSourceGroups = (
     environmentId: EnvironmentId,
     readinessBySource: AddProjectRemoteSourceReadiness,
@@ -1110,6 +1154,7 @@ function OpenCommandPaletteDialog(props: {
     ];
 
     if (newProjectsRootFor(environmentId) !== null) {
+      sourceItems.unshift(buildMultiRepositoryProjectItem(environmentId));
       sourceItems.unshift({
         kind: "action",
         value: `action:add-project:${environmentId}:new`,
@@ -1626,6 +1671,10 @@ function OpenCommandPaletteDialog(props: {
         openNewProjectFlow();
       },
     });
+    const onlyEnvironment = newProjectEnvironmentOptions[0];
+    if (newProjectEnvironmentOptions.length === 1 && onlyEnvironment) {
+      actionItems.push(buildMultiRepositoryProjectItem(onlyEnvironment.environmentId));
+    }
   }
 
   const addProjectAction: CommandPaletteActionItem = {
@@ -2509,6 +2558,10 @@ function OpenCommandPaletteDialog(props: {
           value: "new-project-existing",
           label: "",
           items: [
+            {
+              ...buildMultiRepositoryProjectItem(newProjectFlow.environmentId, newProjectName),
+              disabled: isCreatingNewProject,
+            },
             {
               kind: "action",
               value: "new-project:existing",

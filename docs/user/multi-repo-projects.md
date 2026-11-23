@@ -9,6 +9,11 @@ fits three common setups:
 
 The project folder does not have to be a Git repository itself.
 
+On desktop and web, choose **Add project → Multi-repository project** to group existing folders
+for a new task. Give the project a name, search or browse for the folders, and check the ones
+you want. You can change directories without losing your selection. Creating the project opens
+a thread with those folders, each at its original path.
+
 ## Which repositories a project covers
 
 There is no list to keep. A project covers every repository inside its folder: T3 Code looks one

@@ -3,6 +3,7 @@ import {
   GitCommandError,
   type GitManagerServiceError,
   ProjectId,
+  type ProjectCreateNewInput,
   type ThreadId,
   VcsProcessSpawnError,
 } from "@t3tools/contracts";
@@ -79,6 +80,7 @@ const isMissingExecutable = (cause: unknown) =>
   cause.reason.method === "spawn";
 
 const isGitCommandError = Schema.is(GitCommandError);
+const isProjectInvalidError = Schema.is(ProjectService.ProjectInvalidError);
 
 export class NamedProjectFolderError extends Schema.TaggedError<NamedProjectFolderError>()(
   "NamedProjectFolderError",
@@ -102,7 +104,7 @@ export class NamedProjectCreateError extends Schema.TaggedError<NamedProjectCrea
   },
 ) {
   override get message(): string {
-    return "Failed to create the project.";
+    return isProjectInvalidError(this.cause) ? this.cause.message : "Failed to create the project.";
   }
 }
 
@@ -121,7 +123,7 @@ export class ManagedProjectFolders extends Context.Service<
     }) => Effect.Effect<Option.Option<string>, ScratchFolderError>;
     readonly namedProjectsRoot: string;
     /** Removes failed/cancelled creations' folders only while no project owns them. */
-    readonly createNamedProject: (input: { readonly name: string }) => Effect.Effect<
+    readonly createNamedProject: (input: ProjectCreateNewInput) => Effect.Effect<
       {
         readonly projectId: ProjectId;
         readonly workspaceRoot: string;
@@ -473,10 +475,15 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const workspaceRoot = yield* claimNamedFolder(input.name);
     const removeFolder = fileSystem.remove(workspaceRoot, { recursive: true }).pipe(Effect.ignore);
+    const trackedFolders = input.trackedFolders ?? [];
     const prepared = yield* Effect.all([
-      scaffoldRepository(workspaceRoot, input.name).pipe(
-        Effect.mapError((cause) => new NamedProjectFolderError({ folder: workspaceRoot, cause })),
-      ),
+      trackedFolders.length === 0
+        ? scaffoldRepository(workspaceRoot, input.name).pipe(
+            Effect.mapError(
+              (cause) => new NamedProjectFolderError({ folder: workspaceRoot, cause }),
+            ),
+          )
+        : Effect.undefined,
       random
         .uuidV4()
         .pipe(Effect.mapError((cause) => new NamedProjectCreateError({ workspaceRoot, cause }))),
@@ -488,6 +495,7 @@ const make = Effect.gen(function* () {
         projectId: ProjectId.make(id),
         title: input.name,
         workspaceRoot,
+        trackedFolders,
       })
       .pipe(
         // Re-check ownership before deleting rejected creations; interruption after commit or conflicts can leave an owner.

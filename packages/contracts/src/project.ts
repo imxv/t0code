@@ -570,6 +570,7 @@ export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 
 export const ProjectCreateNewInput = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  trackedFolders: Schema.optionalKey(ProjectAddedFolders),
 });
 export type ProjectCreateNewInput = typeof ProjectCreateNewInput.Type;
 

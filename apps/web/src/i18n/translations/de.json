@@ -12786,5 +12786,19 @@
   "99d51127f573296b": "Weiteres Konto",
   "8ec2c57414669b79": "Verbinde einen zweiten {tracker}-Workspace oder -Nutzer.",
   "99963c0142e17f00": "Für das neue {tracker}-Konto.",
-  "6d8e4ebc889bace9": "Konto hinzufügen"
+  "6d8e4ebc889bace9": "Konto hinzufügen",
+  "d938635f52c6bf22": "Multi-repository project",
+  "8819ac704e82c38f": "Choose several folders for one project",
+  "985faecee6a4a653": "Choose folders on {environment} to work in together.",
+  "9343b308b0d200a9": "Filter by name or enter a path",
+  "e4b661d248910442": "Browse {name}",
+  "8693257d7944463f": "{count, plural, one {{count} folder selected} other {{count} folders selected}}",
+  "2012772d7235926d": "Multi-repository project",
+  "8645583332ec940f": "Project name",
+  "3de96f57975b7794": "Find folders",
+  "f146ea5d2b76de99": "Parent folder",
+  "74e5723466f4239d": "Keep typing to narrow the list.",
+  "51ede6d3abe15dee": "No matching folders",
+  "82fea3c6d2a4f856": "Creating project…",
+  "609f36c98b56c302": "Create project"
 }

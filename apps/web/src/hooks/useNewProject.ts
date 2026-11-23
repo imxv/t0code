@@ -7,7 +7,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectCreateNewInput } from "@t3tools/contracts";
 import { msg } from "gt-react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -77,10 +77,14 @@ export function useNewProject() {
     readonly environmentId: EnvironmentId;
     readonly name: string;
     readonly publishTo: NewProjectPublishTarget | null;
+    readonly trackedFolders?: ProjectCreateNewInput["trackedFolders"];
   }): Promise<boolean> => {
     const result = await createNew({
       environmentId: input.environmentId,
-      input: { name: input.name },
+      input: {
+        name: input.name,
+        ...(input.trackedFolders === undefined ? {} : { trackedFolders: input.trackedFolders }),
+      },
     });
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {

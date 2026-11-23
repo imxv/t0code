@@ -475,6 +475,49 @@ it.effect("starts a named project as a committed repository, and suffixes a take
   ),
 );
 
+it.effect("creates a plain project folder with existing repositories attached", () =>
+  withScratch(({ baseDir }) =>
+    Effect.gen(function* () {
+      const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+      const projects = yield* ProjectService.ProjectService;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const trackedFolders = ["api", "web"].map((name) => ({
+        name,
+        path: path.join(baseDir, name),
+      }));
+      for (const folder of trackedFolders) {
+        yield* fileSystem.makeDirectory(folder.path);
+        yield* git(folder.path, ["init", "--quiet"]);
+      }
+
+      const rejected = yield* folders
+        .createNamedProject({
+          name: "Cross-repo feature",
+          trackedFolders: [
+            ...trackedFolders,
+            { name: "missing", path: path.join(baseDir, "missing") },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.include(rejected.message, "is not a folder on this machine");
+
+      const result = yield* folders.createNamedProject({
+        name: "Cross-repo feature",
+        trackedFolders,
+      });
+      const project = Option.getOrThrow(yield* projects.getById(result.projectId));
+      assert.equal(
+        project.workspaceRoot,
+        path.join(folders.namedProjectsRoot, "cross-repo-feature"),
+      );
+      assert.deepEqual(project.trackedFolders, trackedFolders);
+      assert.isFalse(yield* fileSystem.exists(path.join(result.workspaceRoot, ".git")));
+      assert.isUndefined(result.commitError);
+    }),
+  ),
+);
+
 it.effect("gives concurrent named projects with the same name distinct folders", () =>
   withScratch(() =>
     withGitEnv(
