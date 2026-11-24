@@ -141,16 +141,20 @@ const runScan = (input: ScannerTestInput) =>
     return yield* scanner.scan;
   }).pipe(Effect.provide(layerScannerTest(input)));
 
-const runRecentThreadOutcomes = (input: ScannerTestInput & { readonly workspaceRoot: string }) =>
+const runRecentThreadOutcomes = (
+  input: ScannerTestInput & { readonly workspaceRoot: string; readonly sourceProjectKey?: string },
+) =>
   Effect.gen(function* () {
     const scanner = yield* AgentSessionScanner.AgentSessionScanner;
-    return yield* scanner.recentThreads(input.workspaceRoot).pipe(
+    return yield* scanner.recentThreads(input.workspaceRoot, [], input.sourceProjectKey).pipe(
       Stream.runCollect,
       Effect.map((outcomes) => Array.from(outcomes)),
     );
   }).pipe(Effect.provide(layerScannerTest(input)));
 
-const runRecentThreads = (input: ScannerTestInput & { readonly workspaceRoot: string }) =>
+const runRecentThreads = (
+  input: ScannerTestInput & { readonly workspaceRoot: string; readonly sourceProjectKey?: string },
+) =>
   runRecentThreadOutcomes(input).pipe(
     Effect.map((outcomes) =>
       outcomes.flatMap((outcome) => (outcome._tag === "Importable" ? [outcome.thread] : [])),
@@ -1801,6 +1805,75 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
 
         expect(threads.map((thread) => thread.title)).toEqual(["Renamed chat"]);
       }),
+    );
+
+    it.effect(
+      "imports all history by logical Codex project, including old archived chats outside its roots",
+      () =>
+        Effect.gen(function* () {
+          const claudeHomePath = yield* makeTempDir("t3code-claude-");
+          const codexHomePath = yield* makeTempDir("t3code-codex-");
+          const configBaseDir = yield* makeTempDir("t3code-config-");
+          const id = "019a5f00-0000-7000-8000-000000000001";
+          const filePath = `${codexHomePath}/archived_sessions/rollout-${id}.jsonl`;
+          yield* TestClock.setTime(Date.parse("2026-11-08T12:00:00Z"));
+          yield* writeTranscript({
+            filePath,
+            mtimeMs: Date.parse("2026-01-01T00:00:00Z"),
+            contents: [
+              JSON.stringify({ type: "session_meta", payload: { id, cwd: "/old/scratch" } }),
+              ...Array.from({ length: 250 }, (_, i) =>
+                JSON.stringify({
+                  type: "response_item",
+                  timestamp: "2026-01-01T00:00:00Z",
+                  payload: {
+                    type: "message",
+                    role: i % 2 ? "assistant" : "user",
+                    content: [{ type: "input_text", text: `Message ${i}` }],
+                  },
+                }),
+              ),
+            ].join("\n"),
+          });
+          const db = new NodeSqlite.DatabaseSync(`${codexHomePath}/state_5.sqlite`);
+          try {
+            db.exec(`CREATE TABLE projects (id TEXT, name TEXT, position INTEGER);
+            CREATE TABLE project_roots (project_id TEXT, path TEXT, position INTEGER);
+            CREATE TABLE threads (id TEXT, project_id TEXT, rollout_path TEXT, cwd TEXT, title TEXT, name TEXT, archived INTEGER, updated_at INTEGER, source TEXT);
+            INSERT INTO projects VALUES ('coins', 'Coins', 0), ('empty', 'Empty', 1), ('home', 'Home', 2);
+            INSERT INTO project_roots VALUES ('coins', '/code/web', 0), ('coins', '/code/api', 1);`);
+            db.prepare("INSERT INTO project_roots VALUES ('home', ?, 0)").run(configBaseDir);
+            db.prepare(
+              "INSERT INTO threads VALUES (?, 'coins', ?, '/old/scratch', 'Original', 'Renamed', 1, 1767225600, 'vscode')",
+            ).run(id, filePath);
+          } finally {
+            db.close();
+          }
+          const input = { claudeHomePath, codexHomePath, configBaseDir };
+          const scan = yield* runScan(input).pipe(
+            Effect.provideService(HostProcess.Platform, "darwin"),
+          );
+          expect(scan.candidates.find((p) => p.title === "Home")?.path).toMatch(
+            /^\/Users\/Shared\/T0 Codex Projects\/codex-/,
+          );
+          const project = scan.candidates.find((p) => p.title === "Coins")!;
+          expect(project.trackedFolders?.map((f) => f.path)).toEqual(["/code/web", "/code/api"]);
+          expect(scan.candidates.find((p) => p.title === "Empty")?.threadCount).toBe(0);
+          const outcomes = yield* runRecentThreadOutcomes({
+            ...input,
+            workspaceRoot: project.path,
+            sourceProjectKey: project.sourceProjectKey!,
+          });
+          expect(outcomes).toHaveLength(1);
+          const outcome = outcomes[0]!;
+          expect(outcome._tag).toBe("Importable");
+          if (outcome._tag !== "Importable") return;
+          expect(outcome.thread.title).toBe("Renamed");
+          expect(outcome.thread.archived).toBe(true);
+          expect(outcome.thread.messages).toHaveLength(250);
+          expect(outcome.thread.omittedMessageCount).toBe(0);
+          expect(outcome.worktree).toBeNull();
+        }),
     );
 
     it.effect("imports Codex chats moved from a scratch folder into a Codex project", () =>

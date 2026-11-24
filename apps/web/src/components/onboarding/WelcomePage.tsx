@@ -1650,7 +1650,10 @@ function useProjectImport({
               commandId: attempt.commandId,
               title: candidate.title,
               workspaceRoot: candidate.path,
-              createWorkspaceRootIfMissing: false,
+              createWorkspaceRootIfMissing: candidate.sourceProjectKey !== undefined,
+              ...(candidate.trackedFolders === undefined
+                ? {}
+                : { trackedFolders: candidate.trackedFolders }),
               defaultModelSelection: null,
             },
           });
@@ -1670,7 +1673,13 @@ function useProjectImport({
         }
         const threadImportResult = await importThreads({
           environmentId,
-          input: { projectId, expectedWorkspaceRoot: candidate.path },
+          input: {
+            projectId,
+            expectedWorkspaceRoot: candidate.path,
+            ...(candidate.sourceProjectKey === undefined
+              ? {}
+              : { sourceProjectKey: candidate.sourceProjectKey }),
+          },
         });
         if (importGeneration !== importGenerationRef.current) return false;
         if (threadImportResult._tag === "Success") {

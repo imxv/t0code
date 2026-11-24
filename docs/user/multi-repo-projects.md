@@ -9,6 +9,12 @@ fits three common setups:
 
 The project folder does not have to be a Git repository itself.
 
+When importing from Codex on the welcome page, select the named projects to keep their names,
+ordered folders, and conversation membership. Projects with the same name or folders remain
+separate, and empty projects are included. Named Codex projects import older and archived
+conversations too. Importing again repairs previously imported conversations' project membership
+without duplicating them; conversations currently running are skipped until they finish.
+
 On desktop and web, choose **Add project → Multi-repository project** to group existing folders
 for a new task. Give the project a name, search or browse for the folders, and check the ones
 you want. You can change directories without losing your selection. Creating the project opens

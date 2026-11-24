@@ -196,7 +196,9 @@ const makeImporter = Effect.fn(function* (
     readonly workspaceRoot: string;
     readonly scanner: AgentSessionScanner.AgentSessionScanner["Service"];
   },
+  logicalProject?: string,
 ) {
+  const targetProjectId = logicalProject === undefined ? projectId : ProjectId.make(logicalProject);
   const sql = yield* SqlClient.SqlClient;
   const events = yield* EventStore.EventStoreV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -239,13 +241,35 @@ const makeImporter = Effect.fn(function* (
           ),
           realScan === undefined
             ? Layer.mock(AgentSessionScanner.AgentSessionScanner)({
+                project: () =>
+                  Effect.succeed({
+                    sourceProjectKey: logicalProject,
+                    path: "/workspace/project",
+                    title: "Grouped",
+                    trackedFolders: [{ name: "web", path: "/workspace/web" }],
+                    sources: ["codex"],
+                    threadCount: candidates.length,
+                    lastActiveAt: timestamp,
+                    alreadyImported: false,
+                  }),
                 recentThreads: () => Stream.fromIterable(candidates),
               })
             : Layer.succeed(AgentSessionScanner.AgentSessionScanner, realScan.scanner),
           Layer.mock(ProjectService.ProjectService)({
+            update: () =>
+              Effect.succeed({
+                id: targetProjectId,
+                title: "Grouped",
+                workspaceRoot: "/workspace/project",
+                defaultModelSelection: null,
+                scripts: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                deletedAt: null,
+              }),
             getById: () =>
               Effect.succeedSome({
-                id: projectId,
+                id: targetProjectId,
                 title: "Project",
                 workspaceRoot: realScan?.workspaceRoot ?? "/workspace/project",
                 defaultModelSelection: null,
@@ -278,7 +302,10 @@ const makeImporter = Effect.fn(function* (
   );
   const importer = Context.get(context, AgentSessionImporter.AgentSessionImporter);
   return {
-    run: importer.importRecentAgentThreads({ projectId }),
+    run: importer.importRecentAgentThreads({
+      projectId: targetProjectId,
+      ...(logicalProject === undefined ? {} : { sourceProjectKey: logicalProject }),
+    }),
     importNativeHistory: importer.importNativeHistory,
     published,
   };
@@ -1050,4 +1077,42 @@ it.effect("repeated imports reach linked-worktree sessions behind the scan budge
     );
     expect(oldest.worktreePath).toBe(worktree);
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
+);
+
+it.effect(
+  "moves an existing import into its logical project and expands its history without creating a duplicate",
+  () =>
+    Effect.gen(function* () {
+      const source = candidate(CODEX_MODEL_SELECTION, "grouped-session");
+      const first = yield* makeImporter([source]);
+      expect(yield* first.run).toEqual({ importedCount: 1, skippedCount: 0 });
+      const expanded = {
+        ...source,
+        thread: {
+          ...source.thread,
+          messages: [
+            ...source.thread.messages,
+            { role: "user" as const, text: "More history", createdAt: timestamp },
+          ],
+        },
+      };
+      const migration = yield* makeImporter(
+        [expanded],
+        Effect.void,
+        undefined,
+        undefined,
+        ServerSettings.layerTest(),
+        undefined,
+        "logical-project",
+      );
+      expect(yield* migration.run).toEqual({ importedCount: 1, skippedCount: 0 });
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const result = yield* store.getThreadRecords(importId(source), ["messages"]);
+      expect(result.thread.projectId).toBe("logical-project");
+      expect(result.messages.map((m) => m.text)).toEqual(["Fix it", "Fixed", "More history"]);
+      yield* migration.run;
+      expect((yield* store.getThreadRecords(importId(source), ["messages"])).messages).toHaveLength(
+        3,
+      );
+    }).pipe(Effect.provide(persistence), Effect.scoped),
 );

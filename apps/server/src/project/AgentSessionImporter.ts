@@ -1,4 +1,5 @@
 import {
+  CommandId,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -34,6 +35,7 @@ import * as Stream from "effect/Stream";
 
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { threadHasUnfinishedWork } from "../orchestration-v2/Orchestrator.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -225,6 +227,26 @@ const make = Effect.gen(function* () {
     ) {
       return yield* new AgentSessionImportProjectChangedError({ projectId: input.projectId });
     }
+    if (input.sourceProjectKey !== undefined) {
+      const candidate = yield* scanner.project(input.sourceProjectKey);
+      if (candidate === undefined || candidate.path !== project.workspaceRoot) {
+        return yield* new AgentSessionImportProjectChangedError({ projectId: input.projectId });
+      }
+      yield* projects
+        .update({
+          commandId: CommandId.make(
+            `codex-project:${input.projectId}:${DateTime.toEpochMillis(yield* DateTime.now)}`,
+          ),
+          projectId: input.projectId,
+          title: candidate.title,
+          trackedFolders: candidate.trackedFolders ?? [],
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new AgentSessionScanError({ operation: "read-projects", cause }),
+          ),
+        );
+    }
     // Imports run in full access, except under a policy ceiling: then in the project's default,
     // which the policy keeps under it, so imported threads never sit above the ceiling.
     const runtimeMode =
@@ -262,7 +284,11 @@ const make = Effect.gen(function* () {
         ),
       );
     })).flat();
-    const outcomes = scanner.recentThreads(project.workspaceRoot, completedSources);
+    const outcomes = scanner.recentThreads(
+      project.workspaceRoot,
+      completedSources,
+      input.sourceProjectKey,
+    );
     const importedThreadIds = new Set<ThreadId>();
     let importedCount = 0;
     let skippedCount = 0;
@@ -324,6 +350,93 @@ const make = Effect.gen(function* () {
             orchestrator.getThreadRecords(threadId, ["messages"]),
           );
           if (Option.isSome(existing)) {
+            if (input.sourceProjectKey !== undefined) {
+              return yield* threadCommands.withLock(
+                threadId,
+                Effect.gen(function* () {
+                  const current = yield* orchestrator.getThreadRecords(
+                    threadId,
+                    ["messages", "runs", "runtimeRequests", "turnItems"],
+                    { turnItemTypes: ["system_notice"] },
+                  );
+                  if (
+                    current.thread.historyOrigin !== "v1_import" ||
+                    threadHasUnfinishedWork(current) ||
+                    current.thread.deletedAt !== null ||
+                    (current.runs.length === 0 && current.messages.length > thread.messages.length)
+                  ) {
+                    return yield* new AgentSessionThreadModifiedError({ threadId });
+                  }
+                  const now = yield* DateTime.now;
+                  const revision = `${input.projectId}:${input.sourceProjectKey}:${source.size}:${source.mtimeMs}`;
+                  yield* eventSink.write({
+                    events: [
+                      ...(current.runs.length > 0
+                        ? []
+                        : thread.messages.flatMap((message, index) =>
+                            messageEvents({ threadId, index, message }),
+                          )
+                      ).map((event) => ({ ...event, id: EventId.make(`${event.id}:${revision}`) })),
+                      ...current.turnItems
+                        .filter((item) => item.type === "system_notice")
+                        .filter(
+                          (item) =>
+                            current.runs.length === 0 &&
+                            item.id === `${IMPORT_EVENT_PREFIX}:history-truncated:${threadId}`,
+                        )
+                        .map((item): OrchestrationV2DomainEvent => ({
+                          id: EventId.make(`${item.id}:restored:${revision}`),
+                          type: "turn-item.updated",
+                          threadId,
+                          occurredAt: now,
+                          payload: {
+                            ...item,
+                            type: "system_notice",
+                            message: "Full Codex conversation history imported.",
+                            updatedAt: now,
+                          },
+                        })),
+                      {
+                        id: EventId.make(`${IMPORT_EVENT_PREFIX}:project:${threadId}:${revision}`),
+                        type: "thread.metadata-updated",
+                        threadId,
+                        providerInstanceId: thread.providerInstanceId,
+                        occurredAt: now,
+                        payload: {
+                          ...current.thread,
+                          projectId: input.projectId,
+                          ...(current.runs.length === 0
+                            ? {
+                                title: thread.title,
+                                archivedAt: thread.archived ? dateTime(thread.updatedAt) : null,
+                              }
+                            : {}),
+                          updatedAt: now,
+                        },
+                      },
+                    ],
+                  });
+                  const previousRuntime = yield* runtimes.getByThreadId({ threadId });
+                  if (Option.isSome(previousRuntime)) {
+                    const previous = previousRuntime.value;
+                    yield* runtimes.upsert({
+                      ...previous,
+                      runtimePayload: {
+                        ...(typeof previous.runtimePayload === "object" &&
+                        previous.runtimePayload !== null
+                          ? previous.runtimePayload
+                          : {}),
+                        cwd: current.thread.worktreePath ?? project.workspaceRoot,
+                      },
+                    });
+                  } else {
+                    yield* persistRuntime;
+                  }
+                  yield* runtimes.recordImportedTranscript({ threadId, source });
+                  return true;
+                }),
+              );
+            }
             if (existing.value.thread.projectId !== input.projectId) {
               return yield* new AgentSessionThreadProjectConflictError({
                 threadId,
@@ -385,7 +498,7 @@ const make = Effect.gen(function* () {
             forkedFrom: null,
             createdAt,
             updatedAt,
-            archivedAt: null,
+            archivedAt: thread.archived ? updatedAt : null,
             settledOverride: "settled",
             settledAt: updatedAt,
             unsettledAt: null,

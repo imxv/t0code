@@ -1,3 +1,4 @@
+import { readCodexProjects, type CodexProject } from "./CodexProjects.ts";
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeZlib from "node:zlib";
@@ -228,6 +229,7 @@ export interface AgentSessionThread {
   readonly updatedAt: string;
   readonly messages: ReadonlyArray<AgentSessionThreadMessage>;
   readonly omittedMessageCount: number;
+  readonly archived?: boolean;
 }
 
 export type AgentSessionRecentThread =
@@ -246,9 +248,13 @@ export class AgentSessionScanner extends Context.Service<
   AgentSessionScanner,
   {
     readonly scan: Effect.Effect<AgentSessionScanResult, AgentSessionScanError>;
+    readonly project: (
+      key: string,
+    ) => Effect.Effect<AgentSessionProjectCandidate | undefined, AgentSessionScanError>;
     readonly recentThreads: (
       workspaceRoot: string,
       completedSources?: ReadonlyArray<AgentSessionImportSource>,
+      sourceProjectKey?: string,
     ) => Stream.Stream<AgentSessionRecentThread, AgentSessionScanError>;
   }
 >()("t3/project/AgentSessionScanner") {}
@@ -525,6 +531,7 @@ function parseAgentSessionRecords(
   records: ReadonlyArray<DecodedTranscriptRecord>,
   claudeFields: ClaudeFields,
   droppedMessageCount: number,
+  maxMessages = MAX_IMPORTED_MESSAGES,
 ): AgentSessionThread | "empty" | null {
   const fallbackTimestamp = DateTime.formatIso(DateTime.makeUnsafe(input.lastActiveAtMs));
   // Claude filenames are session IDs. Codex rollout filenames include extra
@@ -620,7 +627,7 @@ function parseAgentSessionRecords(
     hasAssistantMessage ||= message.role === "assistant";
     conversationMessageCount += 1;
     messages.push(message);
-    if (messages.length > MAX_IMPORTED_MESSAGES) messages.shift();
+    if (messages.length > maxMessages) messages.shift();
   };
 
   const hasMatchingCodexEventInTurn = (text: string) => {
@@ -755,7 +762,7 @@ function parseAgentSessionRecords(
   const { codexResponseUser: _codexResponseUser, ...visibleFirstUserMessage } = firstUserMessage;
   const retainedMessages = firstUserMessageRetained
     ? visibleMessages
-    : [visibleFirstUserMessage, ...visibleMessages.slice(-(MAX_IMPORTED_MESSAGES - 1))];
+    : [visibleFirstUserMessage, ...visibleMessages.slice(-(maxMessages - 1))];
 
   return {
     source: input.source,
@@ -1838,6 +1845,9 @@ export const make = Effect.gen(function* () {
       ({ source }) => `${source.providerInstanceId}\0${source.filePath}`,
     );
     const raw: Array<RawCandidate> = [];
+    const codexProjects: Array<
+      CodexProject & { homePath: string; providerInstanceId: ProviderInstanceId }
+    > = [];
     let truncated = false;
     let metadataTruncated = false;
 
@@ -1919,6 +1929,26 @@ export const make = Effect.gen(function* () {
       }
 
       const transcriptCandidates: Array<TranscriptCandidate> = [];
+      if (source === "codex") {
+        for (const home of homes) {
+          for (const project of yield* readCodexProjects(home.homePath).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not read Codex project catalog", { cause }).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    truncated = true;
+                  }),
+                ),
+                Effect.as([]),
+              ),
+            ),
+          )) {
+            codexProjects.push({ ...project, ...home });
+          }
+        }
+      }
       const discover =
         source === "claudeAgent"
           ? discoverClaudeTranscripts
@@ -1988,11 +2018,17 @@ export const make = Effect.gen(function* () {
       metadataTruncated ||= metadataBudget.truncated;
     }
 
-    return { candidates: raw, truncated: truncated || metadataTruncated, metadataTruncated };
+    return {
+      candidates: raw,
+      codexProjects,
+      truncated: truncated || metadataTruncated,
+      metadataTruncated,
+    };
   });
 
   let cachedCandidates: Effect.Success<ReturnType<typeof collectCandidates>> | null = null;
 
+  let cachedScan: AgentSessionScanResult | null = null;
   const scan: AgentSessionScanner["Service"]["scan"] = Effect.gen(function* () {
     cachedCandidates = yield* collectCandidates();
     const { candidates: raw, truncated } = cachedCandidates;
@@ -2077,6 +2113,62 @@ export const make = Effect.gen(function* () {
       });
     }
 
+    for (const project of cachedCandidates.codexProjects) {
+      const trackedFolders = project.roots.map((root) => ({
+        path: root,
+        name: path.basename(root),
+      }));
+      const managedPath = path.join(baseDir, "projects", `codex-${project.key}`);
+      // A whole-home project would contain a managed folder under ~/.t0 or ~/.t3.
+      // macOS provides a persistent, writable location outside that home for its empty container.
+      const containsManagedPath = project.roots.some((root) => {
+        const relative = path.relative(root, managedPath);
+        return (
+          relative === "" ||
+          (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+        );
+      });
+      const expectedPath =
+        containsManagedPath && platform === "darwin"
+          ? path.join("/Users/Shared", "T0 Codex Projects", `codex-${project.key}`)
+          : managedPath;
+      const uniqueSourceNameAndRoots =
+        cachedCandidates.codexProjects.filter(
+          (other) =>
+            other.title === project.title &&
+            other.roots.length === project.roots.length &&
+            other.roots.every((root, index) => root === project.roots[index]),
+        ).length === 1;
+      const matches = importedProjects.filter(
+        (existing) =>
+          existing.workspaceRoot === expectedPath ||
+          (uniqueSourceNameAndRoots &&
+            !existing.id.startsWith("import:codex-project:") &&
+            existing.title === project.title &&
+            existing.trackedFolders?.length === trackedFolders.length &&
+            trackedFolders.every(
+              (folder, i) => existing.trackedFolders?.[i]?.path === folder.path,
+            )),
+      );
+      const existing = matches.length === 1 ? matches[0] : undefined;
+      candidates.push({
+        path: existing?.workspaceRoot ?? expectedPath,
+        title: project.title,
+        sourceProjectKey: project.key,
+        trackedFolders,
+        ...(existing === undefined ? {} : { projectId: existing.id }),
+        sources: ["codex"],
+        threadCount: project.threads.length,
+        lastActiveAt:
+          project.threads.length === 0
+            ? null
+            : DateTime.formatIso(
+                DateTime.makeUnsafe(Math.max(...project.threads.map((t) => t.updated_at)) * 1000),
+              ),
+        alreadyImported: existing !== undefined,
+        git: null,
+      });
+    }
     candidates.sort((left, right) => {
       if (left.lastActiveAt === right.lastActiveAt) return left.path.localeCompare(right.path);
       if (left.lastActiveAt === null) return 1;
@@ -2084,20 +2176,26 @@ export const make = Effect.gen(function* () {
       return right.lastActiveAt.localeCompare(left.lastActiveAt);
     });
 
-    return {
+    cachedScan = {
       candidates,
       scannedAt: DateTime.formatIso(yield* DateTime.now),
       ...(truncated ? { truncated: true } : {}),
     };
+    return cachedScan;
   });
 
   const prepareRecentThreads = Effect.fn("AgentSessionScanner.prepareRecentThreads")(function* (
     workspaceRoot: string,
     completedSources: ReadonlyArray<AgentSessionImportSource>,
+    sourceProjectKey?: string,
   ) {
     const root = path.resolve(expandHomePath(workspaceRoot, homeDir));
     const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
-    if (isExcludedProjectPath(root) || isExcludedProjectPath(realRoot)) return Stream.empty;
+    if (
+      sourceProjectKey === undefined &&
+      (isExcludedProjectPath(root) || isExcludedProjectPath(realRoot))
+    )
+      return Stream.empty;
     const rootIdentity = yield* directoryIdentity(root);
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
     const cutoffMs = nowMs - RECENT_THREAD_WINDOW_MS;
@@ -2106,7 +2204,30 @@ export const make = Effect.gen(function* () {
     if (cachedCandidates === null || cachedCandidates.metadataTruncated) {
       cachedCandidates = yield* collectCandidates();
     }
-    const { candidates } = cachedCandidates;
+    const sourceProject = cachedCandidates.codexProjects.find((p) => p.key === sourceProjectKey);
+    if (sourceProjectKey !== undefined && sourceProject === undefined) {
+      return yield* new AgentSessionScanError({
+        operation: "read-projects",
+        cause: "Unknown Codex project",
+      });
+    }
+    const candidates: ReadonlyArray<RawCandidate> =
+      sourceProject === undefined
+        ? cachedCandidates.candidates
+        : [
+            {
+              cwd: sourceProject.roots[0] ?? root,
+              source: "codex",
+              providerInstanceId: sourceProject.providerInstanceId,
+              homePath: sourceProject.homePath,
+              threadCount: sourceProject.threads.length,
+              lastActiveAtMs: null,
+              transcripts: sourceProject.threads.map((thread) => ({
+                filePath: thread.rollout_path,
+                mtimeMs: thread.updated_at * 1000,
+              })),
+            },
+          ];
 
     // The scan counts a linked worktree's sessions toward its main checkout, so import them with it.
     const candidateDirectories = candidates.flatMap((candidate) => {
@@ -2155,12 +2276,12 @@ export const make = Effect.gen(function* () {
       const expanded = expandHomePath(candidate.cwd.trim(), homeDir);
       if (!path.isAbsolute(expanded)) continue;
       const resolved = path.resolve(expanded);
-      if (!(yield* belongsToRoot(resolved))) continue;
+      if (sourceProject === undefined && !(yield* belongsToRoot(resolved))) continue;
 
       for (const transcript of candidate.transcripts) {
         if (
           transcript.mtimeMs === null ||
-          transcript.mtimeMs < cutoffMs ||
+          (sourceProject === undefined && transcript.mtimeMs < cutoffMs) ||
           transcript.mtimeMs > nowMs
         ) {
           continue;
@@ -2192,7 +2313,7 @@ export const make = Effect.gen(function* () {
       let paths = codexRolloutPaths.get(providerInstanceId);
       if (paths === undefined) {
         paths = new Map(
-          candidates.flatMap((candidate) =>
+          cachedCandidates!.candidates.flatMap((candidate) =>
             candidate.source === "codex" && candidate.providerInstanceId === providerInstanceId
               ? candidate.transcripts.flatMap((transcript) => {
                   const match = CODEX_ROLLOUT_ID_PATTERN.exec(transcript.filePath);
@@ -2202,6 +2323,16 @@ export const make = Effect.gen(function* () {
               : [],
           ),
         );
+        const allPaths = new Map(paths);
+        for (const project of cachedCandidates!.codexProjects) {
+          if (project.providerInstanceId !== providerInstanceId) continue;
+          for (const thread of project.threads) {
+            const match = CODEX_ROLLOUT_ID_PATTERN.exec(thread.rollout_path);
+            const id = match?.[2] ?? match?.[1];
+            if (id !== undefined) allPaths.set(id, thread.rollout_path);
+          }
+        }
+        paths = allPaths;
         codexRolloutPaths.set(providerInstanceId, paths);
       }
       return paths.get(rolloutId);
@@ -2286,10 +2417,14 @@ export const make = Effect.gen(function* () {
             projectCwd(snapshot.cwd.value, transcript.projectRoots).trim(),
             homeDir,
           );
-          if (!path.isAbsolute(expandedCwd) || !(yield* belongsToRoot(path.resolve(expandedCwd)))) {
+          if (
+            sourceProject === undefined &&
+            (!path.isAbsolute(expandedCwd) || !(yield* belongsToRoot(path.resolve(expandedCwd))))
+          ) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
           }
-          const worktree = yield* rootWorktree(path.resolve(expandedCwd));
+          const worktree =
+            sourceProject === undefined ? yield* rootWorktree(path.resolve(expandedCwd)) : null;
 
           const inheritedRecords =
             candidate.source === "codex"
@@ -2316,6 +2451,7 @@ export const make = Effect.gen(function* () {
               : [...inheritedRecords, ...snapshot.records],
             snapshot.claudeFields,
             snapshot.droppedMessageCount,
+            sourceProject === undefined ? MAX_IMPORTED_MESSAGES : Number.POSITIVE_INFINITY,
           );
           if (parsedThread === "empty") {
             // null means an unreadable history base, which may hold the conversation.
@@ -2335,7 +2471,10 @@ export const make = Effect.gen(function* () {
               codexThreadNamesByHome.get(candidate.homePath) ??
               (yield* readCodexThreadNames(candidate.homePath));
             codexThreadNamesByHome.set(candidate.homePath, names);
-            savedTitle = names.get(parsedThread.providerSessionId);
+            const saved = sourceProject?.threads.find(
+              (t) => t.id === parsedThread.providerSessionId,
+            );
+            savedTitle = saved?.name ?? names.get(parsedThread.providerSessionId) ?? saved?.title;
           }
 
           const source: AgentSessionImportSource = {
@@ -2351,8 +2490,17 @@ export const make = Effect.gen(function* () {
           importedSessions.add(sessionKey);
           return Option.some<AgentSessionRecentThread>({
             _tag: "Importable",
-            thread:
-              savedTitle === undefined ? parsedThread : { ...parsedThread, title: savedTitle },
+            thread: {
+              ...parsedThread,
+              ...(savedTitle === undefined ? {} : { title: savedTitle }),
+              ...(sourceProject === undefined
+                ? {}
+                : {
+                    archived:
+                      sourceProject.threads.find((t) => t.id === parsedThread.providerSessionId)
+                        ?.archived === 1,
+                  }),
+            },
             source,
             worktree,
           });
@@ -2366,9 +2514,14 @@ export const make = Effect.gen(function* () {
   const recentThreads: AgentSessionScanner["Service"]["recentThreads"] = (
     workspaceRoot,
     completedSources = [],
-  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources));
+    sourceProjectKey,
+  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources, sourceProjectKey));
 
-  return AgentSessionScanner.of({ scan, recentThreads });
+  const project = Effect.fn("AgentSessionScanner.project")(function* (key: string) {
+    const snapshot = cachedScan ?? (yield* scan);
+    return snapshot.candidates.find((candidate) => candidate.sourceProjectKey === key);
+  });
+  return AgentSessionScanner.of({ scan, project, recentThreads });
 });
 
 export const layer = Layer.effect(AgentSessionScanner, make).pipe(

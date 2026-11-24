@@ -30,6 +30,10 @@ export const AgentSessionProjectGit = Schema.Struct({
 export type AgentSessionProjectGit = typeof AgentSessionProjectGit.Type;
 
 export const AgentSessionProjectCandidate = Schema.Struct({
+  sourceProjectKey: Schema.optional(TrimmedNonEmptyString),
+  trackedFolders: Schema.optional(
+    Schema.Array(Schema.Struct({ name: Schema.String, path: TrimmedNonEmptyString })),
+  ),
   path: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   projectId: Schema.optional(ProjectId),
@@ -51,6 +55,7 @@ export type AgentSessionScanResult = typeof AgentSessionScanResult.Type;
 export const AgentSessionImportInput = Schema.Struct({
   projectId: ProjectId,
   expectedWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  sourceProjectKey: Schema.optional(TrimmedNonEmptyString),
 });
 export type AgentSessionImportInput = typeof AgentSessionImportInput.Type;
 
