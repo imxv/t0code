@@ -56,6 +56,14 @@ export interface ProviderInstance {
   readonly workspaceRescans?: Stream.Stream<string>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   readonly invalidateCaches?: Effect.Effect<void>;
+  /**
+   * Config keys the instance applies in place. A save that changes only these keys calls `apply`
+   * with their decoded values instead of rebuilding the instance and stopping its sessions.
+   */
+  readonly liveConfig?: {
+    readonly keys: ReadonlyArray<string>;
+    readonly apply: (values: Readonly<Record<string, unknown>>) => Effect.Effect<void>;
+  };
   /** Moves a long-lived service onto a newly updated binary before its version is read back. */
   readonly afterUpdate?: Effect.Effect<void, ProviderDriverError>;
   readonly consumeResetCredit?: (

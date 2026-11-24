@@ -360,6 +360,7 @@ import { hasAvailableCompactionProvider } from "./chat/compaction.logic";
 import {
   deriveLatestContextWindowSnapshot,
   hasDismissedResumeCompaction,
+  latestProviderTurnContextBreakdown,
   latestProviderTurnTokenUsage,
   shouldOfferResumeCompaction,
 } from "@t3tools/client-runtime/state/context-window";
@@ -1579,6 +1580,7 @@ export default function ChatView(props: ChatViewProps) {
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
     activeProviderThread,
+    latestProviderTurnContextBreakdown(serverProjection?.providerTurns ?? [], activeProviderThread),
   );
   const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
   const activeWorkStartedAt =

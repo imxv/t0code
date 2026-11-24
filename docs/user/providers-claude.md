@@ -53,7 +53,9 @@ T3 Code uses the Claude configuration on the connected server.
 Set **Auto-compact after** in the Claude provider settings to an integer between
 `100000` and `1000000`. For example, `300000` asks Claude to summarize at about
 300,000 tokens. This changes when compaction happens, not the model's context
-window. Leave it empty for Claude Code's default.
+window. Leave it empty for Claude Code's default. You can also pick a threshold from
+**Context window** in a Claude thread's details. Open conversations on that Claude
+provider pick up the change without restarting.
 
 You can also send `/compact` in an existing conversation. Claude Code also
 compacts automatically. To see context usage, see

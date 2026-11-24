@@ -80,6 +80,44 @@ const withoutPresentation = ({
 const runtimeEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
   Equal.equals(withoutPresentation(a), withoutPresentation(b));
 
+const withoutConfigKeys = (
+  entry: ProviderInstanceConfig,
+  keys: ReadonlyArray<string>,
+): ProviderInstanceConfig => {
+  const { config, ...rest } = entry;
+  if (typeof config !== "object" || config === null || Array.isArray(config)) return entry;
+  const remaining: Record<string, unknown> = { ...config };
+  for (const key of keys) delete remaining[key];
+  return Object.keys(remaining).length === 0 ? rest : { ...rest, config: remaining };
+};
+
+// The decoded live-config values when they are a save's only runtime change.
+const liveConfigChange = Effect.fn("ProviderInstanceRegistry.liveConfigChange")(function* <R>(
+  driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>,
+  live: LiveEntry,
+  next: ProviderInstanceConfig,
+) {
+  const liveConfig = live.instance.liveConfig;
+  const driver = driversById.get(next.driver);
+  if (
+    liveConfig === undefined ||
+    driver === undefined ||
+    !runtimeEqual(
+      withoutConfigKeys(live.entry, liveConfig.keys),
+      withoutConfigKeys(next, liveConfig.keys),
+    )
+  ) {
+    return undefined;
+  }
+  const decoder = Schema.decodeUnknownEffect(driver.configSchema);
+  const decoded = yield* decoder(next.config ?? driver.defaultConfig()).pipe(Effect.option);
+  if (Option.isNone(decoded) || typeof decoded.value !== "object" || decoded.value === null) {
+    return undefined;
+  }
+  const config = decoded.value;
+  return Object.fromEntries(liveConfig.keys.map((key) => [key, Reflect.get(config, key)]));
+});
+
 // Drivers stamp the presentation they were created with into every snapshot, so a renamed
 // instance kept live restamps what it reports.
 const withLivePresentation = (instance: ProviderInstance, created: ProviderInstanceConfig) => {
@@ -432,17 +470,19 @@ const makeReconcile = <R>(input: {
       // Close changed/removed scopes before replacements to preserve one live scope per id.
       const removedIds: Array<ProviderInstanceId> = [];
       const replacedIds = new Set<ProviderInstanceId>();
+      const liveConfigUpdates = new Map<ProviderInstanceId, Readonly<Record<string, unknown>>>();
       for (const [instanceId, live] of previousEntries) {
         if (!nextKeys.has(instanceId)) {
           removedIds.push(instanceId);
           continue;
         }
         const nextEntry = configMap[instanceId];
-        if (
-          rebuild.has(instanceId) ||
-          (nextEntry !== undefined && !runtimeEqual(live.entry, nextEntry))
-        ) {
+        if (rebuild.has(instanceId)) {
           replacedIds.add(instanceId);
+        } else if (nextEntry !== undefined && !runtimeEqual(live.entry, nextEntry)) {
+          const values = yield* liveConfigChange(driversById, live, nextEntry);
+          if (values === undefined) replacedIds.add(instanceId);
+          else liveConfigUpdates.set(instanceId, values);
         }
       }
       const retiredIds = [...removedIds, ...replacedIds];
@@ -499,6 +539,10 @@ const makeReconcile = <R>(input: {
           if (entryEqual(existing.entry, entry)) {
             builtEntries.set(instanceId, existing);
           } else {
+            const liveValues = liveConfigUpdates.get(instanceId);
+            if (liveValues !== undefined) {
+              yield* existing.instance.liveConfig?.apply(liveValues) ?? Effect.void;
+            }
             existing.setPresentation(entry);
             builtEntries.set(instanceId, { ...existing, entry });
             presentationChanged = true;

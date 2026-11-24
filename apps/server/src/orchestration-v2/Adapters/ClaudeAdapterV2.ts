@@ -36,6 +36,7 @@ import {
   type ClaudeLedgerUsage,
   type ClaudeModelLedger,
 } from "../../provider/ClaudeTurnTokenUsage.ts";
+import { claudeContextBreakdown } from "../../provider/ClaudeContextUsage.ts";
 import { toMcpElicitationResponse } from "../../provider/CodexMcpElicitation.ts";
 import {
   type CanUseTool,
@@ -61,6 +62,7 @@ import {
   type SpawnedProcess as ClaudeSpawnedProcess,
   type SDKAssistantMessage,
   type SDKAPIRetryMessage,
+  type SDKControlGetContextUsageResponse,
   type SDKMessage,
   type SDKRateLimitInfo,
   type SDKResultMessage,
@@ -116,6 +118,7 @@ import {
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
+  type OrchestrationV2ProviderTurnTokenUsage,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2UserInputQuestion,
   type OrchestrationV2Subagent,
@@ -797,6 +800,10 @@ export interface ClaudeAgentSdkQuerySession {
   ) => Effect.Effect<boolean, ClaudeAgentSdkQueryRunnerError>;
   readonly mcpServerStatus: Effect.Effect<
     ReadonlyArray<ClaudeMcpServerStatus>,
+    ClaudeAgentSdkQueryRunnerError
+  >;
+  readonly getContextUsage?: Effect.Effect<
+    SDKControlGetContextUsageResponse,
     ClaudeAgentSdkQueryRunnerError
   >;
   readonly readMcpResource: (input: {
@@ -2109,6 +2116,10 @@ export const layerQueryRunner: Layer.Layer<
         mcpServerStatus: Effect.tryPromise({
           try: () => queryRuntime.mcpServerStatus(),
           catch: (cause) => queryRunnerError(cause, "mcpServerStatus"),
+        }),
+        getContextUsage: Effect.tryPromise({
+          try: () => queryRuntime.getContextUsage({ detail: "summary" }),
+          catch: (cause) => queryRunnerError(cause, "getContextUsage"),
         }),
         readMcpResource: ({ server, uri }) =>
           Effect.tryPromise({
@@ -5384,6 +5395,7 @@ interface ActiveClaudeTurnContext {
     usage: ClaudeMessageUsage | null;
   } | null;
   compactionTokens: number | undefined;
+  latestTokenUsage?: OrchestrationV2ProviderTurnTokenUsage;
   readonly toolCalls: Map<string, ActiveClaudeToolCall>;
   // A successful status can precede the boundary that supplies its token counts.
   compaction: Extract<OrchestrationV2TurnItem, { type: "compaction" }> | null;
@@ -5930,6 +5942,10 @@ export interface ClaudeAdapterV2Options {
     ) => Effect.Effect<void>;
   };
   readonly installationGate?: ProviderInstallationGate.ProviderInstallationGate["Service"];
+  /** Receives the setter that moves new and running sessions to another auto-compact window. */
+  readonly bindAutoCompactWindow?: (
+    set: (autoCompactWindow: string) => Effect.Effect<void>,
+  ) => void;
 }
 
 export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
@@ -6087,6 +6103,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       Effect.map(claudeToolSearchOverride),
     );
 
+  let autoCompactWindow = adapterOptions.settings.autoCompactWindow;
+  const liveQueries = new Set<Ref.Ref<ClaudeLiveQueryContext | null>>();
+  adapterOptions.bindAutoCompactWindow?.((next) =>
+    Effect.gen(function* () {
+      autoCompactWindow = next;
+      for (const queryContext of liveQueries) {
+        const live = yield* Ref.get(queryContext);
+        if (live === null || live.stopping) continue;
+        // The env var outranks every autoCompactWindow setting; empty defers to them again.
+        yield* live.query
+          .applyFlagSettings({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: next } })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("orchestration-v2.claude-auto-compact-window-not-applied", {
+                nativeThreadId: live.nativeThreadId,
+                cause,
+              }),
+            ),
+          );
+      }
+    }),
+  );
+
   const resolveAutoCompactWindow = Effect.fn("ClaudeAdapterV2.resolveAutoCompactWindow")(function* (
     cwd: string | null,
     modelSelection: ModelSelection,
@@ -6110,8 +6149,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       }
     }
     if (autoCompactEnabled === false) return "";
-    if (adapterOptions.settings.autoCompactWindow !== "")
-      return adapterOptions.settings.autoCompactWindow;
+    if (autoCompactWindow !== "") return autoCompactWindow;
     const validWindow = (value: unknown) => {
       const selected = Option.getOrUndefined(decodeClaudeCompactWindow(value));
       return typeof selected === "number" && selected >= 100_000 && selected <= 1_000_000
@@ -6244,6 +6282,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
+        liveQueries.add(queryContext);
         // Wake buffers replay result frames, so ledger growth is measured once on arrival.
         const resultLedgerUsage = new WeakMap<SDKMessage, ClaudeLedgerUsage>();
         const resultsReportingNewContextWindow = new WeakSet<SDKMessage>();
@@ -6717,6 +6756,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (claudeMessageInputTokens(usage) <= 0) return;
             context.compactionTokens = undefined;
           }
+          context.latestTokenUsage = tokenUsage;
           yield* emitProviderEvent({
             type: "provider_turn.updated",
             driver: CLAUDE_PROVIDER,
@@ -9965,6 +10005,31 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
           }
 
+          const latestTokenUsage = input.context.latestTokenUsage;
+          const contextUsageRequest = currentQuery?.query.getContextUsage;
+          const contextBreakdown =
+            latestTokenUsage !== undefined &&
+            contextUsageRequest !== undefined &&
+            currentQuery?.lastTurn === input.context &&
+            !currentQuery.stopping &&
+            input.status === "completed" &&
+            input.result?.subtype === "success" &&
+            droppedSteers.length === 0
+              ? yield* contextUsageRequest.pipe(
+                  Effect.flatMap((report) =>
+                    Effect.try({
+                      try: () => claudeContextBreakdown(report),
+                      catch: (cause) => queryRunnerError(cause, "normalizeContextUsage"),
+                    }),
+                  ),
+                  Effect.timeoutOrElse({
+                    duration: "500 millis",
+                    orElse: () => Effect.undefined,
+                  }),
+                  Effect.orElseSucceed(() => undefined),
+                )
+              : undefined;
+
           const threadDisposition = input.threadDisposition ?? "reusable";
           const terminalEvent: ProviderAdapter.ProviderAdapterV2Event =
             input.status === "failed"
@@ -10009,6 +10074,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     status: input.status,
                     completedAt: input.completedAt,
                   }),
+                  ...(latestTokenUsage === undefined || contextBreakdown === undefined
+                    ? {}
+                    : { tokenUsage: { ...latestTokenUsage, contextBreakdown } }),
                   turnTokenUsage: normalizeClaudeTurnTokenUsage(
                     input.result,
                     input.context.subagentsByTaskId.size > 0 ||
@@ -13594,7 +13662,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { workspace: turnInput.runtimePolicy.workspace }),
             attachmentsDir,
-            settings: adapterOptions.settings,
+            settings: { ...adapterOptions.settings, autoCompactWindow },
             // Delegated threads have no one typing, so they never ask for suggestions.
             promptSuggestions:
               !isDelegatedAppThread(turnInput.appThread) && (yield* promptSuggestionsEnabled),
@@ -14671,7 +14739,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           yield* Deferred.succeed(existing.closed, undefined);
         });
-        yield* Effect.addFinalizer(() => closeSession());
+        yield* Effect.addFinalizer(() =>
+          closeSession().pipe(Effect.ensuring(Effect.sync(() => liveQueries.delete(queryContext)))),
+        );
 
         // Metadata-only transcripts cannot be resumed or recreated; fail resumeThread to trigger a fresh session and handoff.
         const claudeTranscriptState = Effect.fn("ClaudeAdapterV2.claudeTranscriptState")(function* (
@@ -15439,7 +15509,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
     hooks: Pick<
       ClaudeAdapterV2Options,
-      "scopedLimitNames" | "onUsageLimits" | "onSessionInit" | "modelCatalog" | "routeModelCatalog"
+      | "scopedLimitNames"
+      | "onUsageLimits"
+      | "onSessionInit"
+      | "modelCatalog"
+      | "routeModelCatalog"
+      | "bindAutoCompactWindow"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

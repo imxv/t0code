@@ -714,6 +714,8 @@ export function makeProviderSettingsSchema<const Fields extends Schema.Struct.Fi
   );
 }
 
+const CODEX_AUTO_COMPACT_TOKEN_LIMIT_PATTERN = /^(?:|[1-9]\d{4,6}|10000000)$/;
+
 export const CodexSettings = makeProviderSettingsSchema(
   {
     setupMode: Schema.optionalKey(Schema.Literals(["managed", "existing"])).pipe(
@@ -764,9 +766,20 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    autoCompactTokenLimit: TrimmedString.check(
+      Schema.isPattern(CODEX_AUTO_COMPACT_TOKEN_LIMIT_PATTERN),
+    ).pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Auto-compact after",
+        description:
+          "Compact after 10,000 to 10,000,000 tokens. Leave empty to use Codex's default.",
+        providerSettingsForm: { placeholder: "e.g. 300000", clearWhenEmpty: "omit" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: ["binaryPath", "homePath", "shadowHomePath", "autoCompactTokenLimit", "launchArgs"],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;

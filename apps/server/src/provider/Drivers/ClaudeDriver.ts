@@ -176,6 +176,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     // Retain reports until the registry subscribes; end its listener on teardown.
     const workspaceRescans = yield* Queue.unbounded<string, Cause.Done>();
     yield* Effect.addFinalizer(() => Queue.end(workspaceRescans));
+    let setAutoCompactWindow: ((autoCompactWindow: string) => Effect.Effect<void>) | undefined;
     const orchestrationAdapter = yield* createClaudeAdapterV2(
       {
         instanceId,
@@ -191,6 +192,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         onSessionInit: (cwd) => Queue.offer(workspaceRescans, cwd).pipe(Effect.asVoid),
         modelCatalog,
         routeModelCatalog: modelRoutes.route,
+        bindAutoCompactWindow: (set) => {
+          setAutoCompactWindow = set;
+        },
       },
     ).pipe(
       Effect.mapError(
@@ -429,6 +433,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       enabled,
       snapshot,
       invalidateCaches: Cache.invalidateAll(capabilitiesProbeCache),
+      liveConfig: {
+        keys: ["autoCompactWindow"],
+        apply: ({ autoCompactWindow }) =>
+          typeof autoCompactWindow === "string" && setAutoCompactWindow !== undefined
+            ? setAutoCompactWindow(autoCompactWindow)
+            : Effect.void,
+      },
       workspaceRescans: Stream.fromQueue(workspaceRescans),
       snapshotForCwd: (cwd: string) =>
         snapshot.getSnapshot.pipe(

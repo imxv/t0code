@@ -3823,6 +3823,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
 
   const makeWakeHarnessWithOptions = (options?: {
+    readonly getContextUsage?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["getContextUsage"];
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
     readonly interrupt?: Effect.Effect<void, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
     readonly setPermissionMode?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["setPermissionMode"];
@@ -3856,6 +3857,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly offer?: (message: SDKUserMessage) => Effect.Effect<void>;
     readonly promptSuggestions?: boolean;
     readonly routeModelCatalog?: ClaudeAdapterV2.ClaudeAdapterV2Options["routeModelCatalog"];
+    readonly bindAutoCompactWindow?: ClaudeAdapterV2.ClaudeAdapterV2Options["bindAutoCompactWindow"];
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -3922,6 +3924,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         idAllocator,
         ...(options?.onSessionInit ? { onSessionInit: options.onSessionInit } : {}),
         ...(options?.routeModelCatalog ? { routeModelCatalog: options.routeModelCatalog } : {}),
+        ...(options?.bindAutoCompactWindow
+          ? { bindAutoCompactWindow: options.bindAutoCompactWindow }
+          : {}),
         continuationRequests: {
           offer: (request) =>
             Effect.sync(() => {
@@ -4023,6 +4028,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   }).pipe(Effect.andThen(() => options?.renameSession?.(title) ?? Effect.void)),
                 backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
                 mcpServerStatus: options?.mcp?.mcpServerStatus ?? Effect.succeed([]),
+                ...(options?.getContextUsage ? { getContextUsage: options.getContextUsage } : {}),
                 readMcpResource:
                   options?.mcp?.readMcpResource ??
                   (() => Effect.die("unexpected MCP resource read")),
@@ -4132,6 +4138,48 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  it.effect("moves new and running sessions to a changed auto-compact window", () =>
+    Effect.gen(function* () {
+      let setWindow: ((autoCompactWindow: string) => Effect.Effect<void>) | undefined;
+      const harness = yield* makeWakeHarnessWithOptions({
+        bindAutoCompactWindow: (set) => {
+          setWindow = set;
+        },
+      });
+      assert(setWindow !== undefined);
+      yield* setWindow("400000");
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-auto-compact-window"),
+          providerTurnOrdinal: 1,
+          text: "Hello",
+          attachments: [],
+        }),
+      );
+      const opened = harness.getOpenedOptions()?.settings as
+        | { env?: Record<string, string> }
+        | undefined;
+      assert.equal(opened?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "400000");
+
+      yield* setWindow("");
+      assert.deepEqual(harness.liveSelectionChanges.at(-1), {
+        env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "" },
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
 
   describe("ClaudeAdapterV2 session title sync", () => {
     type TitleSyncHarness = Effect.Success<ReturnType<typeof makeWakeHarnessWithOptions>>;
@@ -10750,7 +10798,26 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
   it.effect("measures a model outside the catalog against the window Claude reports", () =>
     Effect.gen(function* () {
-      const harness = yield* makeWakeHarness;
+      const harness = yield* makeWakeHarnessWithOptions({
+        getContextUsage: Effect.succeed({
+          categories: [
+            { id: "messages", name: "Messages", tokens: 9_720, color: "blue", kind: "used" },
+            { id: "free_space", name: "Free space", tokens: 190_280, color: "gray", kind: "free" },
+          ],
+          totalTokens: 9_720,
+          maxTokens: 200_000,
+          rawMaxTokens: 200_000,
+          percentage: 5,
+          model: "gateway-model",
+          gridRows: [],
+          memoryFiles: [{ path: "/project/CLAUDE.md", type: "Project", tokens: 120 }],
+          mcpTools: [],
+          agents: [],
+          autoCompactThreshold: 170_000,
+          isAutoCompactEnabled: true,
+          apiUsage: null,
+        }),
+      });
       const modelSelection = {
         instanceId: ProviderInstanceId.make(ClaudeAdapterV2.CLAUDE_PROVIDER),
         model: "gateway-model",
@@ -10795,8 +10862,26 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           ? [event.providerTurn.tokenUsage.maxTokens]
           : [],
       );
-      assert.deepEqual(windows, [null, 1_048_576]);
+      assert.deepEqual(windows, [null, 1_048_576, 1_048_576]);
       assert.strictEqual(harness.runtime.getModelContextWindow?.(modelSelection), 1_048_576);
+      const completed = harness.events.find(
+        (event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.status === "completed",
+      );
+      assert(completed?.type === "provider_turn.updated");
+      assert(completed.providerTurn.tokenUsage !== undefined);
+      const tokenUsage = decodeProviderTurnTokenUsage(completed.providerTurn.tokenUsage);
+      assert.equal(tokenUsage.usedTokens, 9_669);
+      assert.deepEqual(tokenUsage.contextBreakdown, {
+        usedTokens: 9_720,
+        maxTokens: 200_000,
+        autoCompactThreshold: 170_000,
+        categories: [
+          { id: "messages", label: "Messages", kind: "used", tokens: 9_720 },
+          { id: "free_space", label: "Free space", kind: "free", tokens: 190_280 },
+        ],
+        memoryFiles: { count: 1, entries: [{ label: "/project/CLAUDE.md", tokens: 120 }] },
+      });
     }).pipe(
       Effect.provide(
         Layer.mergeAll(

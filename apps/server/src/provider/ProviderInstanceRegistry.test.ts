@@ -103,6 +103,7 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   shadowHomePath: "",
   launchArgs: "",
   customModels: [],
+  autoCompactTokenLimit: "",
   ...overrides,
 });
 
@@ -380,6 +381,47 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
         yield* PubSub.take(changes);
         expect(yield* instance!.snapshot.getSnapshot).toMatchObject(presentation);
       }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("applies live config keys in place and rebuilds for any other change", () =>
+    Effect.gen(function* () {
+      let closed = 0;
+      const applied: Array<Readonly<Record<string, unknown>>> = [];
+      const driver: typeof CodexDriver = {
+        ...CodexDriver,
+        create: (input) =>
+          Effect.gen(function* () {
+            const instance = yield* CodexDriver.create(input);
+            yield* Effect.addFinalizer(() => Effect.sync(() => closed++));
+            return {
+              ...instance,
+              liveConfig: {
+                keys: ["launchArgs"],
+                apply: (values) => Effect.sync(() => applied.push(values)),
+              },
+            };
+          }),
+      };
+      const instanceId = ProviderInstanceId.make("account-a");
+      const entry = { driver: CodexDriver.driverKind, enabled: false };
+      const { registry, mutator } = yield* makeProviderInstanceRegistry({
+        drivers: [driver],
+        configMap: { [instanceId]: entry },
+      });
+      const instance = yield* registry.getInstance(instanceId);
+
+      yield* mutator.reconcile({ [instanceId]: { ...entry, config: { launchArgs: "--live" } } });
+      expect(closed).toBe(0);
+      expect(yield* registry.getInstance(instanceId)).toBe(instance);
+      expect(applied).toEqual([{ launchArgs: "--live" }]);
+
+      yield* mutator.reconcile({
+        [instanceId]: { ...entry, config: { launchArgs: "--next", binaryPath: "other-codex" } },
+      });
+      expect(closed).toBe(1);
+      expect(yield* registry.getInstance(instanceId)).not.toBe(instance);
+      expect(applied).toHaveLength(1);
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("treats an explicit in-config enabled:false as disabling despite the envelope", () =>

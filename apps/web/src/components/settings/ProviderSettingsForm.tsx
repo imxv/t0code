@@ -156,6 +156,10 @@ const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
     msg("Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude's default."),
   ],
   [
+    "Compact after 10,000 to 10,000,000 tokens. Leave empty to use Codex's default.",
+    msg("Compact after 10,000 to 10,000,000 tokens. Leave empty to use Codex's default."),
+  ],
+  [
     "When to compact an idle thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Overrides the default in Providers > Advanced.",
     msg(
       "When to compact an idle thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Overrides the default in Providers > Advanced.",

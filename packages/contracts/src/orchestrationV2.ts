@@ -255,6 +255,36 @@ export const OrchestrationV2ContextTransferResolution = Schema.Union([
 export type OrchestrationV2ContextTransferResolution =
   typeof OrchestrationV2ContextTransferResolution.Type;
 
+export const CONTEXT_WINDOW_BREAKDOWN_MAX_CATEGORIES = 20;
+export const CONTEXT_WINDOW_BREAKDOWN_MAX_ENTRIES = 12;
+export const CONTEXT_WINDOW_BREAKDOWN_MAX_LABEL_LENGTH = 160;
+
+const ContextWindowBreakdownLabel = Schema.String.check(
+  Schema.isMaxLength(CONTEXT_WINDOW_BREAKDOWN_MAX_LABEL_LENGTH),
+);
+const ContextWindowBreakdownEntries = Schema.Struct({
+  count: NonNegativeInt,
+  entries: Schema.Array(
+    Schema.Struct({ label: ContextWindowBreakdownLabel, tokens: NonNegativeInt }),
+  ).check(Schema.isMaxLength(CONTEXT_WINDOW_BREAKDOWN_MAX_ENTRIES)),
+});
+const ContextWindowBreakdown = Schema.Struct({
+  usedTokens: NonNegativeInt,
+  maxTokens: PositiveInt,
+  autoCompactThreshold: Schema.optional(PositiveInt),
+  categories: Schema.Array(
+    Schema.Struct({
+      id: Schema.optional(ContextWindowBreakdownLabel),
+      label: ContextWindowBreakdownLabel,
+      kind: Schema.Literals(["used", "free", "buffer", "deferred"]),
+      tokens: NonNegativeInt,
+    }),
+  ).check(Schema.isMaxLength(CONTEXT_WINDOW_BREAKDOWN_MAX_CATEGORIES)),
+  mcpTools: Schema.optional(ContextWindowBreakdownEntries),
+  memoryFiles: Schema.optional(ContextWindowBreakdownEntries),
+});
+export type ContextWindowBreakdown = typeof ContextWindowBreakdown.Type;
+
 export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
   usedTokens: NonNegativeInt,
   maxTokens: Schema.optional(Schema.NullOr(NonNegativeInt)),
@@ -264,6 +294,7 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
   reasoningOutputTokens: Schema.optional(NonNegativeInt),
   promptCacheTtlMs: Schema.optional(PositiveInt),
   autoCompactThreshold: Schema.optional(PositiveInt),
+  contextBreakdown: Schema.optional(ContextWindowBreakdown),
   promptCacheExpiresAt: Schema.optional(Schema.String),
   updatedAt: Schema.String,
 });

@@ -240,6 +240,9 @@ export const CodexDriver: ProviderDriver<
         Effect.map((capabilities) => withCodexNativeLatestVersion(capabilities, httpClient)),
       );
 
+    let setAutoCompactTokenLimit:
+      | ((autoCompactTokenLimit: string) => Effect.Effect<void>)
+      | undefined;
     const orchestrationAdapter = yield* createCodexAdapterV2(
       {
         instanceId,
@@ -255,6 +258,9 @@ export const CodexDriver: ProviderDriver<
           Effect.map((value) => value.models),
         ),
         compatibility: installation.compatibility,
+        bindAutoCompactTokenLimit: (set) => {
+          setAutoCompactTokenLimit = set;
+        },
       },
     ).pipe(
       Effect.mapError(
@@ -424,6 +430,13 @@ export const CodexDriver: ProviderDriver<
       snapshot,
       snapshotForCwd,
       consumeResetCredit,
+      liveConfig: {
+        keys: ["autoCompactTokenLimit"],
+        apply: ({ autoCompactTokenLimit }) =>
+          typeof autoCompactTokenLimit === "string" && setAutoCompactTokenLimit !== undefined
+            ? setAutoCompactTokenLimit(autoCompactTokenLimit)
+            : Effect.void,
+      },
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;

@@ -15,6 +15,7 @@ import {
 import { makeThreadProjectionFixture } from "../test-fixtures";
 import {
   deriveLatestContextWindowSnapshot,
+  latestProviderTurnContextBreakdown,
   latestProviderTurnTokenUsage,
   shouldOfferResumeCompaction,
 } from "@t3tools/client-runtime/state/context-window";
@@ -114,6 +115,55 @@ describe("V2 context window presentation", () => {
         updatedAt: DateTime.makeUnsafe("2026-06-21T00:00:00.000Z"),
       }),
     ).toBeNull();
+  });
+});
+
+describe("context breakdown during a running turn", () => {
+  const breakdown = {
+    usedTokens: 38_600,
+    maxTokens: 1_000_000,
+    categories: [{ id: "messages", label: "Messages", kind: "used" as const, tokens: 17_000 }],
+  };
+  const providerThreadId = ProviderThreadId.make("claude-thread");
+  const turns = [
+    {
+      providerThreadId,
+      tokenUsage: decodeTokenUsage({
+        usedTokens: 38_000,
+        maxTokens: 1_000_000,
+        contextBreakdown: breakdown,
+        updatedAt: "2026-06-19T00:00:00.000Z",
+      }),
+    },
+    {
+      providerThreadId,
+      tokenUsage: decodeTokenUsage({
+        usedTokens: 40_000,
+        maxTokens: 1_000_000,
+        updatedAt: "2026-06-21T00:00:00.000Z",
+      }),
+    },
+  ];
+
+  it("keeps the last completed turn's breakdown until the running turn completes", () => {
+    const live = latestProviderTurnTokenUsage(turns);
+    const latest = latestProviderTurnContextBreakdown(turns, { id: providerThreadId });
+    expect(live?.contextBreakdown).toBeUndefined();
+    expect(deriveLatestContextWindowSnapshot([], live, null, latest)?.contextBreakdown).toEqual(
+      breakdown,
+    );
+    expect(
+      latestProviderTurnContextBreakdown(turns, { id: ProviderThreadId.make("other-thread") }),
+    ).toBeNull();
+  });
+
+  it("drops a breakdown that a later compaction replaced", () => {
+    const live = latestProviderTurnTokenUsage(turns);
+    const latest = latestProviderTurnContextBreakdown(turns);
+    expect(
+      deriveLatestContextWindowSnapshot([compactionEntry(null)], live, null, latest)
+        ?.contextBreakdown,
+    ).toBeUndefined();
   });
 });
 

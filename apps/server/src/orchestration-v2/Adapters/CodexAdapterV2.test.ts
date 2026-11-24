@@ -123,6 +123,35 @@ describe("CodexAdapterV2 context usage", () => {
       updatedAt: "2026-08-29T00:00:00.000Z",
     });
   });
+
+  it.each([
+    { limit: "150000", threshold: 150_000 },
+    { limit: "", threshold: undefined },
+    { limit: "200000", threshold: undefined },
+  ])("reports an auto-compact limit of $limit below the window", ({ limit, threshold }) => {
+    const usage = CodexAdapterV2.codexProviderTurnTokenUsage(
+      {
+        total: {
+          totalTokens: 1,
+          inputTokens: 1,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 1,
+          inputTokens: 1,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 200_000,
+      },
+      "2026-08-29T00:00:00.000Z",
+      limit,
+    );
+    assert.equal(usage.autoCompactThreshold, threshold);
+  });
 });
 
 describe("CodexAdapterV2 assistant message streaming", () => {
@@ -1734,6 +1763,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     promptSuggestions: Effect.Effect<boolean> = Effect.succeed(false),
     onNotification: (method: string) => Effect.Effect<void> = () => Effect.void,
     models?: CodexAdapterV2.CodexAdapterV2Options["models"],
+    bindAutoCompactTokenLimit?: CodexAdapterV2.CodexAdapterV2Options["bindAutoCompactTokenLimit"],
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1798,6 +1828,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         clientFactory,
         ...(onUsageLimits ? { onUsageLimits } : {}),
         ...(models ? { models } : {}),
+        ...(bindAutoCompactTokenLimit ? { bindAutoCompactTokenLimit } : {}),
         digest: yield* Digest.Digest,
         fileSystem,
         idAllocator,
@@ -5042,6 +5073,120 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       assert.equal(resumed.status, "idle");
       assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
     }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reloads a loaded thread with a changed auto-compact limit before its next turn", () =>
+    Effect.gen(function* () {
+      const scenario = "auto-compact-limit-reload";
+      const nativeThreadId = "auto-compact-thread";
+      const preamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: "auto-compact-turn",
+        prompt: "Hello",
+      });
+      const methods: Array<string> = [];
+      const resumeParams: Array<unknown> = [];
+      let setLimit: ((limit: string) => Effect.Effect<void>) | undefined;
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario,
+          entries: [
+            ...preamble.slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "thread/name/set",
+              frame: {
+                id: 3,
+                method: "thread/name/set",
+                params: { threadId: nativeThreadId, name: CODEX_TEST_THREAD_TITLE },
+              },
+            },
+            { type: "emit_inbound", label: "thread/name/set", frame: { id: 3, result: {} } },
+            {
+              type: "expect_outbound",
+              label: "unsubscribe",
+              frame: { id: 4, method: "thread/unsubscribe", params: { threadId: nativeThreadId } },
+            },
+            {
+              type: "emit_inbound",
+              label: "unsubscribe result",
+              frame: { id: 4, result: { status: "unsubscribed" } },
+            },
+            {
+              type: "expect_outbound",
+              label: "resume with the new limit",
+              frame: {
+                id: 5,
+                method: "thread/resume",
+                params: {
+                  threadId: nativeThreadId,
+                  excludeTurns: true,
+                  config: {
+                    ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                    model_auto_compact_token_limit: 300_000,
+                    "shell_environment_policy.set.T3CODE_THREAD_ID": `thread-${scenario}`,
+                  },
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "resume result",
+              frame: {
+                id: 5,
+                result: { thread: { id: nativeThreadId, updatedAt: 1782622450, turns: [] } },
+              },
+            },
+            ...preamble.slice(5).map((entry) => withReplayRequestId(entry, 6)),
+          ],
+        }),
+        () => Effect.void,
+        (method, params) =>
+          Effect.sync(() => {
+            methods.push(method);
+            if (method === "thread/resume") resumeParams.push(params);
+          }),
+        undefined,
+        undefined,
+        undefined,
+        Effect.succeed(false),
+        () => Effect.void,
+        undefined,
+        (set) => {
+          setLimit = set;
+        },
+      );
+      assert(setLimit !== undefined);
+      yield* setLimit("300000");
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("auto-compact-attempt"),
+          text: "Hello",
+        }),
+      );
+      assert.deepEqual(
+        methods.filter((method) => method.startsWith("thread/") || method === "turn/start"),
+        ["thread/start", "thread/name/set", "thread/unsubscribe", "thread/resume", "turn/start"],
+      );
+      assert.equal(
+        (resumeParams[0] as { config: Record<string, unknown> }).config
+          .model_auto_compact_token_limit,
+        300_000,
+      );
+    }).pipe(
+      Effect.scoped,
       Effect.provide(
         Layer.mergeAll(
           IdAllocator.layer,

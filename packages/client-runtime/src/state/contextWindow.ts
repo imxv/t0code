@@ -36,6 +36,7 @@ type NullableContextWindowUsage = {
 };
 
 export type ContextWindowSnapshot = NullableContextWindowUsage & {
+  readonly contextBreakdown?: OrchestrationV2ProviderTurnTokenUsage["contextBreakdown"];
   readonly remainingTokens: number | null;
   readonly usedPercentage: number | null;
   readonly remainingPercentage: number | null;
@@ -74,6 +75,26 @@ export function latestProviderTurnTokenUsage(
         (transfer.status === "pending" || transfer.resolution?.strategy === "native_fork"),
     )?.sourceTokenUsage ?? null
   );
+}
+
+type ContextBreakdownReport = Pick<OrchestrationV2ProviderTurnTokenUsage, "updatedAt"> & {
+  readonly contextBreakdown: NonNullable<OrchestrationV2ProviderTurnTokenUsage["contextBreakdown"]>;
+};
+
+/** Newest report with a context breakdown. Only completed turns carry one. */
+export function latestProviderTurnContextBreakdown(
+  turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "providerThreadId" | "tokenUsage">>,
+  providerThread?: Pick<OrchestrationV2ProviderThread, "id"> | null,
+): ContextBreakdownReport | null {
+  let latest: ContextBreakdownReport | null = null;
+  for (const { providerThreadId, tokenUsage } of turns) {
+    if (tokenUsage?.contextBreakdown === undefined) continue;
+    if (providerThread != null && providerThreadId !== providerThread.id) continue;
+    if (latest === null || Date.parse(tokenUsage.updatedAt) >= Date.parse(latest.updatedAt)) {
+      latest = { contextBreakdown: tokenUsage.contextBreakdown, updatedAt: tokenUsage.updatedAt };
+    }
+  }
+  return latest;
 }
 
 type CompactionItem = Extract<ThreadStructureTurnItem, { readonly type: "compaction" }>;
@@ -130,6 +151,8 @@ export function deriveLatestContextWindowSnapshot(
   }>,
   liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "id" | "contextUsage" | "updatedAt"> | null,
+  // A running turn reports usage without a breakdown; the last one stays until it completes.
+  latestBreakdown?: ContextBreakdownReport | null,
 ): ContextWindowSnapshot | null {
   const latestCompletedCompaction = entries.findLast(
     (entry): entry is { readonly item: CompactionItem } =>
@@ -156,6 +179,20 @@ export function deriveLatestContextWindowSnapshot(
   }
 
   if (liveUsage != null) {
+    const compactedAt =
+      latestCompletedCompaction === undefined
+        ? null
+        : Date.parse(
+            DateTime.formatIso(
+              latestCompletedCompaction.completedAt ?? latestCompletedCompaction.updatedAt,
+            ),
+          );
+    const contextBreakdown =
+      liveUsage.contextBreakdown ??
+      (latestBreakdown != null &&
+      (compactedAt === null || Date.parse(latestBreakdown.updatedAt) >= compactedAt)
+        ? latestBreakdown.contextBreakdown
+        : undefined);
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens = liveUsage.maxTokens ?? null;
     const usedPercentage =
@@ -183,6 +220,7 @@ export function deriveLatestContextWindowSnapshot(
       durationMs: null,
       compactsAutomatically: true,
       autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
+      ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       cost: null,
       updatedAt: liveUsage.updatedAt,
     };
