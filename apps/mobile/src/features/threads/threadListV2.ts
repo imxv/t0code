@@ -314,6 +314,7 @@ export function threadListV2RowAccessibilityLabel(
   input: {
     readonly title: string;
     readonly variant: "card" | "slim";
+    readonly showStatusInSlim?: boolean;
     readonly woke: boolean;
     readonly statusLabel: string | undefined;
     readonly timeLabel: string;
@@ -326,7 +327,7 @@ export function threadListV2RowAccessibilityLabel(
 ): string {
   // Mirrors the row's meta line: a card shows Woke, else its status, else the time.
   const meta =
-    input.variant === "slim"
+    input.variant === "slim" && !input.showStatusInSlim
       ? (input.snoozeWakeLabel ?? input.timeLabel)
       : input.woke
         ? resolve(msg("Woke", { $context: "thread came back from snooze" }))
@@ -345,9 +346,15 @@ export function threadListV2RowAccessibilityLabel(
 /** Row status: a failure the user has already opened settles to ready, like Done. */
 export function resolveThreadListV2RowStatus(
   thread: Parameters<typeof resolveThreadListV2Status>[0] &
-    Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt">,
+    Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt" | "workingSideChatStartedAt">,
 ): ThreadListV2Status {
   const status = resolveThreadListV2Status(thread);
+  if (
+    thread.workingSideChatStartedAt !== undefined &&
+    (status === "ready" || status === "waiting" || status === "failed" || status === "limited")
+  ) {
+    return "working";
+  }
   // A runtime failure without a failed run has nothing to date it, so it stays.
   if (status !== "failed" || thread.latestRun?.status !== "failed") return status;
   return hasUnseenRunFailure(thread) ? status : "ready";

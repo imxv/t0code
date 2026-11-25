@@ -145,6 +145,69 @@ describe("v2 thread shell lists", () => {
     registry.dispose();
   });
 
+  it("rolls up active side chats without changing the parent's runtime or reacting to streaming", () => {
+    const { registry, threads, snapshotAtom } = makeHarness();
+    const root = v2ThreadShell;
+    const child = {
+      ...root,
+      id: ThreadId.make("side-chat"),
+      latestRunId: RunId.make("side-chat-run"),
+      activityRunStatus: "running",
+      activityRunStartedAt: v2Now,
+      status: "running",
+      lineage: {
+        ...root.lineage,
+        parentThreadId: root.id,
+        relationshipToParent: "fork",
+        sideChat: true,
+      },
+    } satisfies OrchestrationV2ThreadShell;
+    const otherStart = DateTime.add(v2Now, { seconds: 30 });
+    const other = {
+      ...child,
+      id: ThreadId.make("other-side-chat"),
+      activityRunStartedAt: otherStart,
+    };
+    const fork = {
+      ...child,
+      id: ThreadId.make("fork"),
+      lineage: { ...child.lineage, sideChat: false },
+    };
+    const stopped = { ...child, activityRunStatus: null, status: "interrupted" } as const;
+    const ref = { environmentId, threadId: root.id };
+    const point = threads.threadShellAtom(ref);
+    const quiet = threads.quietThreadShellAtom(ref);
+    const nav = threads.navigationThreadShellsAtom;
+    const disposers = [registry.mount(point), registry.mount(quiet), registry.mount(nav)];
+    const setChildren = (...children: OrchestrationV2ThreadShell[]) =>
+      registry.set(snapshotAtom(environmentId), {
+        ...v2ShellSnapshot,
+        threads: [root, ...children, fork],
+      });
+    const status = () => registry.get(point)?.workingSideChatStartedAt;
+
+    setChildren(stopped);
+    expect(status()).toBeUndefined();
+    setChildren(child, other);
+    const active = registry.get(point);
+    expect(active?.runtime).toBeNull();
+    expect(status()).toBe(DateTime.formatIso(v2Now));
+    expect(registry.get(quiet)).toBe(active);
+    expect(registry.get(nav)[0]).toBe(active);
+    setChildren({ ...child, updatedAt: otherStart, visibleItemCount: 1 }, other);
+    expect(registry.get(quiet)).toBe(active);
+    expect(registry.get(nav)[0]).toBe(active);
+    setChildren(stopped, other);
+    expect(status()).toBe(DateTime.formatIso(otherStart));
+    setChildren(stopped, { ...other, activityRunStartedAt: null });
+    expect(status()).toBeNull();
+    setChildren(stopped, { ...other, archivedAt: otherStart });
+    expect(status()).toBeUndefined();
+
+    for (const dispose of disposers) dispose();
+    registry.dispose();
+  });
+
   it("keeps a live subagent question inside the parent without flagging its thread", () => {
     const { registry, threads, snapshotAtom } = makeHarness();
     const root = v2ThreadShell;

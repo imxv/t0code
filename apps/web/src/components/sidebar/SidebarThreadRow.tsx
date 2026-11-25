@@ -26,6 +26,7 @@ import { type EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state
 import {
   formatWorkingDurationLabel,
   resolveThreadProviderStack,
+  threadRuntimeIsActive,
 } from "@t3tools/client-runtime/state/models";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { toServerClock } from "@t3tools/client-runtime/clock";
@@ -773,6 +774,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarRowStatus({ ...thread, lastVisitedAt });
+  const showsSideChatWorking =
+    status === "working" && thread.workingSideChatStartedAt !== undefined;
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -792,7 +795,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           label:
             status === "preparing"
               ? gt("Setting up")
-              : thread.goal?.status === "active"
+              : thread.goal?.status === "active" &&
+                  threadRuntimeIsActive(thread.runtime) &&
+                  thread.blockedOnThreadWait !== true
                 ? gt("Goal", { $context: "thread status: working on a goal" })
                 : gt("Working", { $context: "thread status" }),
           icon: "working" as const,
@@ -1421,8 +1426,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           <T>Dismiss Woke notification</T>
                         </TooltipPopup>
                       </Tooltip>
-                    ) : inFolder && topStatus ? (
-                      // Folder rows have no status line, so the status takes the time slot.
+                    ) : (inFolder || showsSideChatWorking) && topStatus ? (
+                      // Compact rows have no status line, so the status takes the time slot.
                       <span
                         className={cn(
                           "inline-flex items-center gap-1 text-xs font-medium",

@@ -180,6 +180,8 @@ export interface EnvironmentThreadShell {
   readonly hasPendingUserInput: boolean;
   readonly pendingUserInputAt?: string | null;
   readonly pendingSubagentRequest?: PendingSubagentRequest | null;
+  /** Absent when no side chat is active, null when active without a known start time. */
+  readonly workingSideChatStartedAt?: string | null;
   /** Guest messages waiting for the owner to send or dismiss. */
   readonly pendingGuestMessageCount?: number;
   readonly hasActionableProposedPlan: boolean;
@@ -414,6 +416,18 @@ export function resolveThreadWorkingStartedAt(input: {
     return valid(run.startedAt) ?? valid(run.requestedAt);
   }
   return null;
+}
+
+export function resolveThreadListWorkingStartedAt(
+  thread: Pick<
+    EnvironmentThreadShell,
+    "latestRun" | "runtime" | "blockedOnThreadWait" | "workingSideChatStartedAt"
+  >,
+): string | null {
+  if (threadRuntimeIsActive(thread.runtime) && thread.blockedOnThreadWait !== true) {
+    return resolveThreadWorkingStartedAt(thread);
+  }
+  return thread.workingSideChatStartedAt ?? null;
 }
 
 export function formatWorkingDurationLabel(

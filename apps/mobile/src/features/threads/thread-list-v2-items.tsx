@@ -23,7 +23,7 @@ import type {
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
 import {
   formatWorkingDurationLabel,
-  resolveThreadWorkingStartedAt,
+  resolveThreadListWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
 import {
   AuthOrchestrationOperateScope,
@@ -869,11 +869,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const rawStatus = resolveThreadListV2Status(thread);
   const status = resolveThreadListV2RowStatus(thread);
+  const showStatusInSlim =
+    variant === "slim" &&
+    !snoozedRow &&
+    status === "working" &&
+    thread.workingSideChatStartedAt !== undefined;
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
   const statusEntry =
-    (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
+    (rawStatus === "working" && workingLabel !== undefined && thread.goal?.status === "active"
       ? {
           ...workingLabel,
           label: msg("Goal", { $context: "thread status, working toward a goal" }),
@@ -883,6 +888,17 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ...statusEntry,
     label: statusEntry.label === null ? null : m(statusEntry.label),
   };
+  const statusIcon = statusLabel ? (
+    <SymbolView
+      name={statusLabel.icon}
+      size={13}
+      tintColorClassName={
+        selected ? selectedThreadRowColors.iconTintClassName : statusLabel.iconTintClassName
+      }
+      type="monochrome"
+      weight="semibold"
+    />
+  ) : null;
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
   // List items keep marked text so they stay the same objects across a language switch.
@@ -893,6 +909,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     {
       title: thread.title,
       variant,
+      showStatusInSlim,
       woke: showsWoke,
       // Working and waiting rows show only an icon and a duration, so name them for speech.
       statusLabel:
@@ -1446,17 +1463,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             </Pressable>
           ) : statusLabel ? (
             <View className="flex-row items-center gap-1">
-              <SymbolView
-                name={statusLabel.icon}
-                size={13}
-                tintColorClassName={
-                  selected
-                    ? selectedThreadRowColors.iconTintClassName
-                    : statusLabel.iconTintClassName
-                }
-                type="monochrome"
-                weight="semibold"
-              />
+              {statusIcon}
               <Text
                 className={cn(
                   "text-xs font-t3-bold",
@@ -1467,7 +1474,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 {status === "working" ? (
                   <ThreadListV2Duration
                     environmentId={thread.environmentId}
-                    startedAt={resolveThreadWorkingStartedAt(thread)}
+                    startedAt={resolveThreadListWorkingStartedAt(thread)}
                     leadingSpace={statusLabel.label !== null}
                   />
                 ) : status === "waiting" ? (
@@ -1510,7 +1517,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               "flex-1 text-xs",
               selected
                 ? selectedThreadRowColors.mutedForegroundClassName
-                : status === "limited"
+                : rawStatus === "limited"
                   ? "text-warning-foreground"
                   : "text-danger-foreground",
             )}
@@ -1739,19 +1746,23 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             ) : null}
           </View>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-          <Text
-            className={cn(
-              "text-sm tabular-nums",
-              selected
-                ? selectedThreadRowColors.mutedForegroundClassName
-                : snoozedRow
-                  ? rowAppearance.mutedForegroundClassName
-                  : rowAppearance.tertiaryForegroundClassName,
-            )}
-            style={{ fontFamily: MONO_FONT }}
-          >
-            {snoozedRow && snoozeWakeLabelText !== undefined ? snoozeWakeLabelText : timeLabel}
-          </Text>
+          {showStatusInSlim ? (
+            statusIcon
+          ) : (
+            <Text
+              className={cn(
+                "text-sm tabular-nums",
+                selected
+                  ? selectedThreadRowColors.mutedForegroundClassName
+                  : snoozedRow
+                    ? rowAppearance.mutedForegroundClassName
+                    : rowAppearance.tertiaryForegroundClassName,
+              )}
+              style={{ fontFamily: MONO_FONT }}
+            >
+              {snoozedRow && snoozeWakeLabelText !== undefined ? snoozeWakeLabelText : timeLabel}
+            </Text>
+          )}
         </View>
       </RowPressable>
     );

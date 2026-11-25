@@ -1,6 +1,6 @@
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
+import { resolveThreadListWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
@@ -995,9 +995,17 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
 
 /** Sidebar row status: a failure the user has already opened settles to ready, like Done. */
 export function resolveSidebarRowStatus(
-  thread: ThreadStatusInput & SidebarThreadStatusInput,
+  thread: ThreadStatusInput &
+    SidebarThreadStatusInput &
+    Pick<SidebarThreadSummary, "workingSideChatStartedAt">,
 ): SidebarThreadStatus {
   const status = resolveSidebarThreadStatus(thread);
+  if (
+    thread.workingSideChatStartedAt !== undefined &&
+    (status === "ready" || status === "waiting" || status === "failed" || status === "limited")
+  ) {
+    return "working";
+  }
   // A runtime failure without a failed run has nothing to date it, so it stays.
   if (status !== "failed" || thread.latestRun?.status !== "failed") return status;
   return hasUnseenRunFailure(thread) ? status : "ready";
@@ -1030,7 +1038,7 @@ export function resolveWindowTitleThreadStatus(
  * hidden threads. Waiting threads stay quiet, like their rows.
  */
 export function resolveSidebarFolderDot(
-  threads: ReadonlyArray<ThreadStatusInput & SidebarThreadStatusInput>,
+  threads: ReadonlyArray<Parameters<typeof resolveSidebarRowStatus>[0]>,
 ): "attention" | "failed" | "unread" | "working" | null {
   const statuses = new Set(threads.map(resolveSidebarRowStatus));
   if (
@@ -1225,9 +1233,9 @@ export function reduceSidebarProjectScopeMenuState(
 }
 
 export function resolveWorkingStartedAt(
-  thread: Pick<SidebarThreadSummary, "latestRun" | "runtime">,
+  thread: Parameters<typeof resolveThreadListWorkingStartedAt>[0],
 ): string | null {
-  return resolveThreadWorkingStartedAt(thread);
+  return resolveThreadListWorkingStartedAt(thread);
 }
 
 export function resolveThreadStatusPill(input: {
