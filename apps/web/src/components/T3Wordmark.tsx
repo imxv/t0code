@@ -1,6 +1,20 @@
 import type { SVGProps } from "react";
 
+import { IS_T0_DESKTOP } from "~/branding";
+
 export function T3Wordmark(props: SVGProps<SVGSVGElement>) {
+  if (IS_T0_DESKTOP) {
+    return (
+      <svg {...props} viewBox="15.5309 37 94.4691 56.96" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM88 93.96C72.8 93.96 66 84.68 66 65.48S72.8 37 88 37s22 9.28 22 28.48-6.8 28.48-22 28.48Zm0-10.88c7.06 0 9.28-5.88 9.28-17.6s-2.22-17.6-9.28-17.6-9.28 5.88-9.28 17.6 2.22 17.6 9.28 17.6Z"
+          fill="currentColor"
+          fillRule="evenodd"
+        />
+      </svg>
+    );
+  }
+
   return (
     <svg {...props} viewBox="15.5309 37 94.3941 56.96" xmlns="http://www.w3.org/2000/svg">
       <path

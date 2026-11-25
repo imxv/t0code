@@ -14,6 +14,7 @@ import { splitTransferredFiles } from "../chat/workspaceFileDrop";
 import { setFileDragActive } from "../Sidebar.logic";
 import { toastManager } from "../ui/toast";
 import { stackedThreadToast } from "../ui/toastHelpers";
+import { APP_BASE_NAME } from "~/branding";
 
 const isActivationPlatform = Schema.is(DesktopAppActivationPlatform);
 
@@ -76,7 +77,9 @@ export function SidebarFolderDrop(props: { children: ReactNode }) {
         stackedThreadToast({
           type: "error",
           title: gt('Could not add "{name}"', { name: folder.name }),
-          description: response?.message ?? gt("T3 Code could not read the folder's path."),
+          description:
+            response?.message ??
+            gt("{brand} could not read the folder's path.", { brand: APP_BASE_NAME }),
         }),
       );
     }

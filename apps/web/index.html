@@ -677,8 +677,14 @@
     <script>
       // Desktop's preload injects branding before page scripts. Titling before the <title> below
       // parses keeps Electron from reporting the web build's channel to the window first.
-      const desktopDisplayName = window.desktopBridge?.getAppBranding?.()?.displayName;
-      if (desktopDisplayName) document.title = desktopDisplayName;
+      const desktopAppBranding = window.desktopBridge?.getAppBranding?.();
+      if (desktopAppBranding) document.title = desktopAppBranding.displayName;
+      if (desktopAppBranding?.baseName === "T0 Code") {
+        const favicon = document.querySelector('link[rel="icon"]');
+        favicon.href = "/t0-app-icon.svg";
+        favicon.sizes.value = "any";
+        document.querySelector('link[rel="apple-touch-icon"]').href = "/t0-app-icon.svg";
+      }
     </script>
     <!-- vite.config.ts stamps the web build's channel into this title. -->
     <title>T3 Code</title>
@@ -688,6 +694,16 @@
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="T3 Code splash screen">
           <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+          <script>
+            if (desktopAppBranding?.baseName === "T0 Code") {
+              document
+                .getElementById("boot-shell-card")
+                .setAttribute("aria-label", "T0 Code splash screen");
+              const logo = document.getElementById("boot-shell-logo");
+              logo.src = "/t0-app-icon.svg";
+              logo.alt = desktopAppBranding.baseName;
+            }
+          </script>
         </div>
       </div>
     </div>

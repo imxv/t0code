@@ -9,7 +9,7 @@ import { T, useGT, useMessages, Var } from "gt-react";
 import { useState } from "react";
 import { AsyncResult } from "effect/reactivity";
 
-import { APP_VERSION } from "~/branding";
+import { APP_BASE_NAME, APP_VERSION } from "~/branding";
 import { isLocalEnvironmentDisabled } from "~/localEnvironment";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments } from "~/state/environments";
@@ -214,7 +214,11 @@ function SwitchPlan({
           ? [gt("This app's updates are off here, so reinstall it yourself to switch.")]
           : []),
         ...(switchesLocal && isMacPlatform(navigator.platform)
-          ? [gt("If T3 Code does not reopen after it restarts, open it again.")]
+          ? [
+              gt("If {brand} does not reopen after it restarts, open it again.", {
+                brand: APP_BASE_NAME,
+              }),
+            ]
           : []),
       ]}
       restarts={everything.restarts}

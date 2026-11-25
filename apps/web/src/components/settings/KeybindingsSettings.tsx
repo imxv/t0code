@@ -23,7 +23,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { T, useGT, useMessages } from "gt-react";
+import { Var, T, useGT, useMessages } from "gt-react";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -101,6 +101,7 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsL
 import { keybindingSearchAnchorId, useSearchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { APP_BASE_NAME } from "~/branding";
 
 function KeybindingPill({ shortcut }: { shortcut: KeybindingShortcut }) {
   const isMac = navigator.platform.toLowerCase().includes("mac");
@@ -286,8 +287,8 @@ function UnknownWhenVariableWarning({
   return (
     <WarningTooltipIcon label={label} focusable={focusable} className="size-4.5">
       <T>
-        T3 Code does not recognize this condition yet. It can still be saved, but it may not match
-        unless the runtime provides it.
+        <Var name="brand">{APP_BASE_NAME}</Var> does not recognize this condition yet. It can still
+        be saved, but it may not match unless the runtime provides it.
       </T>
     </WarningTooltipIcon>
   );

@@ -34,6 +34,7 @@ import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { Spinner } from "../ui/spinner";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
+import { APP_BASE_NAME } from "~/branding";
 
 export const accessConfig: Record<
   AuthMcpClientAccess,
@@ -351,8 +352,8 @@ export function McpConsent({
             />
             <p className="text-xs text-muted-foreground">
               <T>
-                Get one from Use T3 Code in another app (MCP), Settings → Sharing & access, or{" "}
-                <code>t3 auth pairing create</code> on this machine.
+                Get one from Use <Var name="brand">{APP_BASE_NAME}</Var> in another app (MCP),
+                Settings → Sharing & access, or <code>t3 auth pairing create</code> on this machine.
               </T>
             </p>
           </div>

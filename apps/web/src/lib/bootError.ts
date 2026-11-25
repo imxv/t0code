@@ -1,8 +1,9 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 
+import { APP_BASE_NAME, APP_REPOSITORY, DESKTOP_DOWNLOAD_URL, IS_T0_DESKTOP } from "../branding";
+
 const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
-const DOWNLOAD_URL = "https://t3.codes/download";
-const ISSUE_URL = "https://github.com/pingdotgg/t3code/issues/new";
+const ISSUE_URL = `https://github.com/${APP_REPOSITORY}/issues/new`;
 const LAST_FAILURE_KEY = "t3code:boot-failed-at";
 const REPEAT_FAILURE_MS = 5 * 60_000;
 const MAX_CAUSES = 3;
@@ -238,7 +239,7 @@ function mountUpdateButton(
           : undefined;
     run?.then(
       (result) => render(result.state),
-      (error: unknown) => console.warn("Could not update T3 Code.", error),
+      (error: unknown) => console.warn(`Could not update ${APP_BASE_NAME}.`, error),
     );
   });
   // A pushed state is newer than the initial read, so the read must not overwrite it.
@@ -258,7 +259,8 @@ function mountUpdateButton(
 }
 
 export function showBootError(error: unknown) {
-  console.error("T3 Code failed to start.", error);
+  const startupFailure = `${APP_BASE_NAME} failed to start`;
+  console.error(startupFailure, error);
   const bootShell = document.getElementById("boot-shell");
   if (!bootShell) return;
 
@@ -277,7 +279,7 @@ export function showBootError(error: unknown) {
   };
 
   const message = element("div", {}, [
-    element("h1", { textContent: "T3 Code failed to start" }),
+    element("h1", { textContent: startupFailure }),
     element("p", {
       textContent: offline
         ? "This browser appears to be offline. Check the connection, then reload."
@@ -351,8 +353,8 @@ export function showBootError(error: unknown) {
   );
 
   const issue = new URL(ISSUE_URL);
-  issue.searchParams.set("template", "bug_report.yml");
-  issue.searchParams.set("title", "T3 Code failed to start");
+  if (!IS_T0_DESKTOP) issue.searchParams.set("template", "bug_report.yml");
+  issue.searchParams.set("title", startupFailure);
   issue.searchParams.set("area", "apps/web");
   issue.searchParams.set("version", `${environment.version} (${environment.channel})`);
   issue.searchParams.set("environment", `${environment.surface}, ${environment.platform}`);
@@ -365,17 +367,18 @@ export function showBootError(error: unknown) {
     ...(bridge
       ? [
           link(
-            nightly ? `${DOWNLOAD_URL}?channel=nightly` : DOWNLOAD_URL,
-            nightly
+            nightly && !IS_T0_DESKTOP
+              ? `${DESKTOP_DOWNLOAD_URL}?channel=nightly`
+              : DESKTOP_DOWNLOAD_URL,
+            nightly && !IS_T0_DESKTOP
               ? "Download and reinstall the latest nightly build"
-              : "Download and reinstall T3 Code",
+              : `Download and reinstall ${APP_BASE_NAME}`,
           ),
         ]
       : []),
     element("div", {}, [
       element("p", {
-        textContent:
-          "Run this on the computer that runs T3 Code. Your agent can check the local logs and help you file a bug report.",
+        textContent: `Run this on the computer that runs ${APP_BASE_NAME}. Your agent can check the local logs and help you file a bug report.`,
       }),
       element("div", { id: "boot-error-command" }, [command, copyCommand]),
     ]),

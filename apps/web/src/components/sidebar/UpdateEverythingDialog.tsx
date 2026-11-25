@@ -5,6 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { Fragment, type RefObject, useRef } from "react";
 
+import { APP_BASE_NAME } from "~/branding";
 import { environmentThreadShells } from "~/state/threads";
 import {
   AlertDialog,
@@ -142,7 +143,8 @@ function UpdateEverythingDialogContent({
         <AlertDialogDescription>
           {version !== null ? (
             <>
-              T3 Code <span className="font-mono text-xs">{version}</span>
+              {updating.some((row) => row.app === "this-app") ? APP_BASE_NAME : gt("Version")}{" "}
+              <span className="font-mono text-xs">{version}</span>
             </>
           ) : null}
           {version !== null && providerCount > 0 ? " · " : null}
@@ -176,7 +178,9 @@ function UpdateEverythingDialogContent({
               <span role="columnheader">
                 <T>Machine</T>
               </span>
-              <span role="columnheader">T3 Code</span>
+              <span role="columnheader">
+                <T>Version</T>
+              </span>
               <span role="columnheader">
                 <T>Providers</T>
               </span>

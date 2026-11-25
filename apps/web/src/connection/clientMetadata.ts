@@ -5,6 +5,8 @@ import type {
   DesktopBridge,
 } from "@t3tools/contracts";
 
+import { APP_BASE_NAME } from "../branding";
+
 export interface BrowserIdentity {
   readonly userAgent: string;
   readonly platform: string;
@@ -78,7 +80,7 @@ export function clientPresentationMetadata(input: {
   if (input.desktopBridge !== undefined) {
     return {
       // oxlint-disable-next-line t3code/no-untranslated-copy -- client label stored on the server
-      label: "T3 Code Desktop",
+      label: `${APP_BASE_NAME} Desktop`,
       deviceType: "desktop",
       os: clientOsFromElectronPlatform(input.desktopBridge.getClientPlatform()),
       surface: "desktop",

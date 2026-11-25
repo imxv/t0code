@@ -15,6 +15,7 @@ import {
 import { msg, T, useGT, useMessages } from "gt-react";
 import { PlusIcon, XIcon } from "lucide-react";
 
+import { APP_BASE_NAME } from "~/branding";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -214,7 +215,7 @@ const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
   ["Path to the OpenCode binary.", msg("Path to the OpenCode binary.")],
   [
     "Leave blank to let T3 Code spawn the server when needed.",
-    msg("Leave blank to let T3 Code spawn the server when needed."),
+    msg("Leave blank to let {brand} spawn the server when needed.", { brand: APP_BASE_NAME }),
   ],
   ["Stored separately on the host.", msg("Stored separately on the host.")],
   ["Path to the Pi coding agent binary.", msg("Path to the Pi coding agent binary.")],

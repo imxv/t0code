@@ -4,6 +4,8 @@ import * as Schema from "effect/Schema";
 import { msg } from "gt-react";
 import { StarIcon } from "lucide-react";
 
+import { APP_BASE_NAME, APP_REPOSITORY } from "~/branding";
+
 import { m } from "../i18n/messages";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { readLocalApi } from "../localApi";
@@ -14,7 +16,6 @@ import { toastManager } from "./ui/toast";
 // Separate keys so a count written by another tab can never undo a dismissal.
 const SENT_KEY = "t3code:github-star-prompt:sent";
 const DISMISSED_KEY = "t3code:github-star-prompt:dismissed";
-const REPOSITORY = "pingdotgg/t3code";
 const PROMPTS_BEFORE_ASKING = 5;
 const IDLE_MS = 30_000;
 // User-driven actions (send, navigate, type, scroll) start with one of these; touch fires pointerdown.
@@ -34,7 +35,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
   const openInBrowser = () => {
     close();
     void readLocalApi()
-      ?.shell.openExternal(`https://github.com/${REPOSITORY}`)
+      ?.shell.openExternal(`https://github.com/${APP_REPOSITORY}`)
       .catch(() => undefined);
   };
   const starInPlace = async () => {
@@ -45,7 +46,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
       toastManager.update(id, {
         type: "success",
         title: m(msg("Thanks for the star!")),
-        description: m(msg("It really helps T3 Code grow.")),
+        description: m(msg("It really helps {brand} grow.", { brand: APP_BASE_NAME })),
         timeout: 5_000,
         actionProps: undefined,
         data: {},
@@ -61,7 +62,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
     });
   };
   const id = toastManager.add({
-    title: m(msg("Enjoying T3 Code?")),
+    title: m(msg("Enjoying {brand}?", { brand: APP_BASE_NAME })),
     description: m(msg("Give us a star on GitHub to let us know!")),
     timeout: 0,
     onClose: dismiss,
@@ -118,7 +119,7 @@ const starInput = (environmentId: EnvironmentId) => ({
   input: {
     provider: SourceControlProviderKind.make("github"),
     host: "github.com",
-    repository: REPOSITORY,
+    repository: APP_REPOSITORY,
   },
 });
 

@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { APP_BASE_NAME } from "~/branding";
 
 function describeSshTarget(request: DesktopSshPasswordPromptRequest): string {
   return request.username ? `${request.username}@${request.destination}` : request.destination;
@@ -177,8 +178,9 @@ function ActiveSshPasswordPrompt({
               <code>
                 <Var>{target}</Var>
               </code>
-              . T3 Code passes your response to the local SSH process and keeps it in memory to
-              reuse for this host. T3 Code does not write it to disk.
+              . <Var name="brand">{APP_BASE_NAME}</Var> passes your response to the local SSH
+              process and keeps it in memory to reuse for this host.{" "}
+              <Var name="brand">{APP_BASE_NAME}</Var> does not write it to disk.
             </T>
           </DialogDescription>
         </DialogHeader>

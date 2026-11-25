@@ -36,7 +36,14 @@ import { createModelSelection, pickModelSelection } from "@t3tools/shared/model"
 import { resolvePastedPath } from "@t3tools/shared/path";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
-import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import {
+  APP_BASE_NAME,
+  APP_REPOSITORY,
+  APP_VERSION,
+  HOSTED_APP_CHANNEL,
+  HOSTED_APP_CHANNEL_LABEL,
+  IS_T0_DESKTOP,
+} from "../../branding";
 import { AboutVersionTitle } from "./AboutVersionTitle";
 import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
@@ -2534,6 +2541,27 @@ export function AboutSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection id="about" title={gt("App")}>
+        {IS_T0_DESKTOP ? (
+          <SettingsRow
+            title={APP_BASE_NAME}
+            description={gt("An unofficial fork of T3 Code.")}
+            control={
+              <Button
+                render={
+                  <a
+                    href={`https://github.com/${APP_REPOSITORY}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  />
+                }
+                size="sm"
+                variant="outline"
+              >
+                <T>View source on GitHub</T>
+              </Button>
+            }
+          />
+        ) : null}
         {primaryPolicy ? (
           <SettingsRow
             title={gt("Organization")}
@@ -2585,9 +2613,16 @@ export function AboutSettingsPanel() {
         <SettingsRow
           {...setting("privacy-policy")}
           description={
-            telemetryOff === undefined
-              ? gt("How we handle your data, including the anonymous usage data T3 Code collects.")
-              : gt("How we handle your data. {telemetryOff}", { telemetryOff })
+            telemetryOff !== undefined
+              ? gt("How we handle your data. {telemetryOff}", { telemetryOff })
+              : IS_T0_DESKTOP
+                ? gt(
+                    "This fork has usage analytics off by default. This policy is from the upstream project.",
+                  )
+                : gt(
+                    "How we handle your data, including the anonymous usage data {brand} collects.",
+                    { brand: APP_BASE_NAME },
+                  )
           }
           control={
             <Button
@@ -2601,7 +2636,9 @@ export function AboutSettingsPanel() {
         />
         <SettingsRow
           {...setting("open-source-licenses")}
-          description={gt("Notices for dependencies, assets, and optional tools used by T3 Code.")}
+          description={gt("Notices for dependencies, assets, and optional tools used by {brand}.", {
+            brand: APP_BASE_NAME,
+          })}
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

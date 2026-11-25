@@ -20,7 +20,8 @@ import {
   captureSetupShortcutReady,
   type CaptureSetupStep,
 } from "./SnapShotSetupDialog.logic";
-import { msg, T, useGT, useMessages } from "gt-react";
+import { Var, msg, T, useGT, useMessages } from "gt-react";
+import { APP_BASE_NAME } from "~/branding";
 
 const SETUP_STEPS = [
   { id: "access", label: msg("Access", { $context: "setup step: capture permissions" }) },
@@ -31,7 +32,8 @@ const GNOME_ACCESS_COPY = {
   "not-installed": {
     title: msg("Install the extension"),
     description: msg(
-      "The T3 Code GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
+      "The {brand} GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
+      { brand: APP_BASE_NAME },
     ),
   },
   "restart-required": {
@@ -48,7 +50,9 @@ const GNOME_ACCESS_COPY = {
   },
   disabled: {
     title: msg("Enable the extension"),
-    description: msg("Enable T3 Code SnapShots to start capturing windows."),
+    description: msg("Enable {brand} SnapShots to start capturing windows.", {
+      brand: APP_BASE_NAME,
+    }),
   },
   enabled: {
     title: msg("Capture is ready"),
@@ -60,7 +64,9 @@ const GNOME_ACCESS_COPY = {
   },
   error: {
     title: msg("Couldn't set up the extension"),
-    description: msg("Check T3 Code SnapShots in GNOME Extensions, then try again."),
+    description: msg("Check {brand} SnapShots in GNOME Extensions, then try again.", {
+      brand: APP_BASE_NAME,
+    }),
   },
 };
 
@@ -178,7 +184,8 @@ export function SnapShotSetupDialog({
                       ? gt("Update the capture helper")
                       : gt("Allow snapshots"),
                   description: gt(
-                    "T3 Code's capture helper lets you capture other apps and return to your draft. It's included with T3 Code.",
+                    "{brand}'s capture helper lets you capture other apps and return to your draft. It's included with {brand}.",
+                    { brand: APP_BASE_NAME },
                   ),
                 }
           : backend === "niri"
@@ -370,7 +377,9 @@ export function SnapShotSetupDialog({
                   ))}
                   {step === "access" && (backend === "gnome" || helperBackend) ? (
                     <p>
-                      <T>Included with T3 Code. No download needed.</T>
+                      <T>
+                        Included with <Var name="brand">{APP_BASE_NAME}</Var>. No download needed.
+                      </T>
                     </p>
                   ) : null}
                   {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (

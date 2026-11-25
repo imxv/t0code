@@ -24,6 +24,7 @@ import * as Equal from "effect/Equal";
 import { msg } from "gt-react";
 
 import { m, type MessageResolver } from "../../i18n/messages";
+import { APP_BASE_NAME } from "~/branding";
 
 export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
   return mode !== "separate";
@@ -176,7 +177,7 @@ export function getChangedBrowserSettingLabels(
       ? [resolve(msg("Floating preview"))]
       : []),
     ...(settings.pullRequestLinksOpenInApp !== DEFAULT_UNIFIED_SETTINGS.pullRequestLinksOpenInApp
-      ? [resolve(msg("Open pull requests in T3 Code"))]
+      ? [resolve(msg("Open pull requests in {brand}", { brand: APP_BASE_NAME }))]
       : []),
   ];
 }

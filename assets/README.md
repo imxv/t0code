@@ -1,5 +1,9 @@
 # Brand icons
 
+The T0 Code desktop build uses the fork assets in `t0/` for every release
+channel. The upstream icon exporter leaves them alone. Regenerate the Windows
+ICO from `t0/universal-1024.png` if the desktop artwork changes.
+
 The three Icon Composer projects are the source of truth for full application icons:
 
 - `dev/app-icon.icon`

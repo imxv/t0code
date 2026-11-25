@@ -1,4 +1,4 @@
-import { msg } from "gt-react";
+import { Var, msg } from "gt-react";
 import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
 import { useAuth } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
@@ -20,6 +20,7 @@ import {
 } from "./useScopedSettings";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
 import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPolicy";
+import { APP_BASE_NAME } from "~/branding";
 
 /** Features still settling in. */
 export function LabsSettingsPanel() {
@@ -272,7 +273,8 @@ function SimlockHostsRow() {
           <Link to="/settings/devices" className="underline underline-offset-2">
             Devices
           </Link>
-          . An alpha that may change or break. T3 Code never installs Simlock.
+          . An alpha that may change or break. <Var name="brand">{APP_BASE_NAME}</Var> never
+          installs Simlock.
         </T>
       }
       control={
@@ -339,7 +341,8 @@ const AGENT_FEEDBACK_MODE_DESCRIPTIONS: Record<AgentFeedbackMode, string> = {
     "When you ask, agents show you a short report about T3 Code and send it to the T3 team if you approve.",
   ),
   auto: msg(
-    "Agents also report T3 Code problems they hit on their own, such as a T3 tool that failed.",
+    "Agents also report {brand} problems they hit on their own, such as a T3 tool that failed.",
+    { brand: APP_BASE_NAME },
   ),
 };
 

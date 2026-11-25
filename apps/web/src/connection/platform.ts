@@ -43,7 +43,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
 
-import { APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
@@ -275,8 +275,9 @@ export const provisionDesktopSshEnvironment = Effect.fn(
         reason: "configuration",
         detail: m(
           msg(
-            "{label} runs T3 Code {serverVersion}, but this desktop is {appVersion}, and that server could not accept its pairing. Restart the T3 server on {label} so it runs {appVersion}, then retry.",
+            "{label} runs server version {serverVersion}, but this {brand} desktop is {appVersion}, and that server could not accept its pairing. Restart the server on {label} so it runs {appVersion}, then retry.",
             {
+              brand: APP_BASE_NAME,
               label: descriptor.label,
               serverVersion: descriptor.serverVersion,
               appVersion: APP_VERSION,

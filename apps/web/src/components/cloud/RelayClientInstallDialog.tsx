@@ -20,6 +20,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { APP_BASE_NAME } from "~/branding";
 const installSteps: ReadonlyArray<{
   readonly stage: RelayClientInstallProgressStage;
   readonly label: string;
@@ -73,9 +74,12 @@ export function RelayClientInstallDialog() {
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? gt("T3 Code is preparing this environment for secure access through T3 Connect.")
+              ? gt("{brand} is preparing this environment for secure access through T3 Connect.", {
+                  brand: APP_BASE_NAME,
+                })
               : gt(
-                  "T3 Code needs the relay client to make this environment available through T3 Connect.",
+                  "{brand} needs the relay client to make this environment available through T3 Connect.",
+                  { brand: APP_BASE_NAME },
                 )}
           </DialogDescription>
         </DialogHeader>
@@ -100,7 +104,10 @@ export function RelayClientInstallDialog() {
                 value={activeStepIndex + 1}
               />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                <T>Keep T3 Code open while the relay client is installed.</T>
+                <T>
+                  Keep <Var name="brand">{APP_BASE_NAME}</Var> open while the relay client is
+                  installed.
+                </T>
               </p>
             </div>
           ) : (
@@ -110,7 +117,7 @@ export function RelayClientInstallDialog() {
               </p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                 <T>
-                  T3 Code will download and install version{" "}
+                  <Var name="brand">{APP_BASE_NAME}</Var> will download and install version{" "}
                   <Var>{view.status === "confirming" ? view.version : ""}</Var> locally.
                 </T>
               </p>

@@ -62,4 +62,4 @@ for suffix in dmg dmg.blockmap zip zip.blockmap; do
 done
 cp release-mock/latest-mac.yml "$feed_dir/.latest-mac.yml.pending"
 mv "$feed_dir/.latest-mac.yml.pending" "$feed_dir/latest-mac.yml"
-echo "T3 Code $version is available at http://localhost:$port/latest-mac.yml"
+echo "T0 Code $version is available at http://localhost:$port/latest-mac.yml"

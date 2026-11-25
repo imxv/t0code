@@ -9,10 +9,10 @@ import { msg } from "gt-react";
 
 import { m, type MessageResolver } from "../i18n/messages";
 import { channelSwitchLabel } from "./sidebar/updateEverything.logic";
+import { APP_BASE_NAME, APP_REPOSITORY } from "~/branding";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 
 function isValidRepositorySegment(value: string | undefined): value is string {
@@ -27,7 +27,7 @@ function desktopReleaseRepositoryUrl(repository: string | undefined): string {
   const releaseRepository =
     isValidRepositorySegment(owner) && isValidRepositorySegment(name) && extra.length === 0
       ? configuredRepository
-      : DEFAULT_DESKTOP_RELEASE_REPOSITORY;
+      : APP_REPOSITORY;
   return `https://github.com/${releaseRepository}/releases`;
 }
 
@@ -93,20 +93,23 @@ export function getArm64IntelBuildWarningDescription(
   if (action === "download") {
     return resolve(
       msg(
-        "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.",
+        "This Mac has Apple Silicon, but {brand} is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.",
+        { brand: APP_BASE_NAME },
       ),
     );
   }
   if (action === "install") {
     return resolve(
       msg(
-        "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.",
+        "This Mac has Apple Silicon, but {brand} is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.",
+        { brand: APP_BASE_NAME },
       ),
     );
   }
   return resolve(
     msg(
-      "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.",
+      "This Mac has Apple Silicon, but {brand} is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.",
+      { brand: APP_BASE_NAME },
     ),
   );
 }
@@ -203,13 +206,14 @@ export function getDesktopUpdateInstallConfirmationMessage(
   return version
     ? resolve(
         msg(
-          "Install update {version} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
-          { version },
+          "Install update {version} and restart {brand}?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+          { brand: APP_BASE_NAME, version },
         ),
       )
     : resolve(
         msg(
-          "Install update and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+          "Install update and restart {brand}?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+          { brand: APP_BASE_NAME },
         ),
       );
 }

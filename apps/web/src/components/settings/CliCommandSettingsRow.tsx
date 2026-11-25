@@ -13,6 +13,7 @@ import { m } from "../../i18n/messages";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { SettingsRow } from "./settingsLayout";
 import { useSearchableSetting } from "./settingsSearch";
+import { APP_BASE_NAME } from "~/branding";
 
 const FAILURE_TITLES = {
   install: msg("Could not install t3"),
@@ -62,12 +63,13 @@ export function CliCommandSettingsRow() {
   const installed = state.installedPath !== null;
   const description = state.shadowedBy
     ? resolve(
-        msg("Another t3 at {path} runs first in a new terminal. Remove it to use T3 Code's.", {
+        msg("Another t3 at {path} runs first in a new terminal. Remove it to use {brand}'s.", {
+          brand: APP_BASE_NAME,
           path: state.shadowedBy,
         }),
       )
     : !installed
-      ? resolve(msg("Run T3 Code's CLI as `t3` from any terminal."))
+      ? resolve(msg("Run {brand}'s CLI as `t3` from any terminal.", { brand: APP_BASE_NAME }))
       : state.onPath
         ? resolve(
             msg("Installed at {path}. Open a new terminal to use it.", {
