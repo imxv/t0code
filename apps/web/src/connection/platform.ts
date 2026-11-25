@@ -352,6 +352,7 @@ const ANALYTICS_DEVICE_ID_KEY = "t3code:analytics-device-id";
 
 // Lives as long as this browser profile's site data. Storage can be blocked, which only drops the id.
 const analyticsDevice = {
+  enabled: import.meta.env.VITE_T3CODE_TELEMETRY_ENABLED === "true",
   id: Effect.sync(
     Option.liftThrowable(() => {
       const existing = window.localStorage.getItem(ANALYTICS_DEVICE_ID_KEY);

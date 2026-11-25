@@ -26,6 +26,10 @@ an authenticated connection does not count as product use.
 
 ## Collection boundary and delivery
 
+- T0 defaults to no product analytics or relay export. Provider identity reads are lazy and happen
+  only after the reporting gate opens; startup owner discovery follows an accepted heartbeat.
+  Mobile builds also omit the real native crash-report destination unless explicitly opted in,
+  because the native dispatcher can start before JavaScript loads preferences.
 - Payloads stay strictly to product metadata, closed contract enums, and normalized measurements:
   never attach prompts, file paths, credentials, raw provider payloads, device names, conversation
   IDs, or user-named provider instance IDs. Model IDs are reported as the provider used them,

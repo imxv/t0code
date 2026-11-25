@@ -74,6 +74,7 @@ let activeConfigKey: string | null = null;
 let pendingConfiguration = Promise.resolve();
 
 export function configureClientTracing(): Promise<void> {
+  if (import.meta.env.VITE_T3CODE_TELEMETRY_ENABLED !== "true") return Promise.resolve();
   if (activeConfigKey !== null) {
     return pendingConfiguration;
   }

@@ -314,6 +314,33 @@ describe("remote environment authorization", () => {
     }),
   );
 
+  it.effect("connects without reading or transmitting analytics identity by default", () =>
+    Effect.gen(function* () {
+      const fetch = recordedFetch(
+        Response.json({ ticket: "ws-ticket", expiresAt: "2026-05-01T12:05:00.000Z" }),
+      );
+      const url = new URL(
+        yield* resolveRemoteWebSocketConnectionUrl({
+          wsBaseUrl: "wss://remote.example.com/",
+          httpBaseUrl: "https://remote.example.com/",
+          bearerToken: "bearer-token",
+        }).pipe(
+          provideRemoteHttp(fetch.fetchFn),
+          Effect.provideService(ClientCapabilities.AnalyticsDevice, {
+            id: Effect.die("Analytics device must not be read without consent"),
+          }),
+          Effect.provideService(ClientCapabilities.CloudSession, {
+            identity: Effect.die("Analytics account must not be read without consent"),
+            clerkToken: Effect.succeed("clerk-token"),
+          }),
+        ),
+      );
+      expect(url.searchParams.get("wsTicket")).toBe("ws-ticket");
+      expect(url.searchParams.has("clientOwner")).toBe(false);
+      expect(url.searchParams.has("clientDevice")).toBe(false);
+    }),
+  );
+
   it.effect("names the signed-in Connect account and this device by hash only", () =>
     Effect.gen(function* () {
       const fetch = recordedFetch(
@@ -335,6 +362,7 @@ describe("remote environment authorization", () => {
             }),
           ),
           Effect.provideService(ClientCapabilities.AnalyticsDevice, {
+            enabled: true,
             id: Effect.succeedSome("device-1"),
           }),
         ),
