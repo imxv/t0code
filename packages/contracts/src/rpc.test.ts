@@ -7,6 +7,11 @@ import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 
 describe("WebSocket RPC contracts", () => {
+  it("does not expose repository starring through the server's forge credentials", () => {
+    expect(WsRpcGroup.requests.has("sourceControl.star")).toBe(false);
+    expect(WsRpcGroup.requests.has("sourceControl.starred")).toBe(false);
+  });
+
   it("only accepts asset and upload URLs on their own server routes", () => {
     const decodeAsset = Schema.decodeUnknownExit(AssetCreateUrlResult);
     const decodeUpload = Schema.decodeUnknownExit(AttachmentCreateUploadUrlResult);
