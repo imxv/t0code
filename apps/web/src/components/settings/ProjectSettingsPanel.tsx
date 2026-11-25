@@ -8,9 +8,9 @@ import { mapAtomCommandResult, settlePromise } from "@t3tools/client-runtime/sta
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import { reportProjectFailure } from "../../hooks/reportProjectFailure";
 import {
   checkProjectAccess,
-  reportProjectFailure,
   useProjectGroupUpdate,
   type ProjectGroupUpdate,
 } from "../../hooks/useProjectGroupUpdate";

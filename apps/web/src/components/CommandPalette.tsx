@@ -136,7 +136,8 @@ import { useStartTriage } from "../hooks/useStartTriage";
 import { pickTriageEnvironment } from "../lib/triageTarget";
 import { useNewProject } from "../hooks/useNewProject";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
-import { reportProjectFailure, useProjectPin } from "../hooks/useProjectGroupUpdate";
+import { reportProjectFailure } from "../hooks/reportProjectFailure";
+import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import {
   useEnvironmentProviders,
   useEnvironments,

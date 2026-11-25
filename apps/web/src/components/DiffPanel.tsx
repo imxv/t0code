@@ -21,6 +21,7 @@ import {
   FlaskConicalOffIcon,
   FolderTreeIcon,
   PilcrowIcon,
+  PlusIcon,
   Rows3Icon,
   TextWrapIcon,
   ChevronRightIcon,
@@ -66,6 +67,7 @@ import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollaps
 import { LIVE_REFRESH_MIN_INTERVAL_MS, useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
   useProject,
+  useThreadChangedFileFolders,
   useThreadCheckpointSummaries,
   useQuietThreadShell,
   useQuietThreadVisibleTurnItems,
@@ -99,6 +101,7 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -126,9 +129,17 @@ import {
   threadChangedRepositories,
   threadGitRepositories,
   turnDiffSections,
+  untrackedChangeFolders,
+  type GitRepositoryDiffSection,
+  type ThreadGitRepository,
   type TurnDiffSection,
 } from "@t3tools/client-runtime/state/thread-repositories";
 import { useOpenLink } from "../browser/useOpenLink";
+import { useAllRepositoriesGitDiff } from "./diffs/useAllRepositoriesGitDiff";
+import { UntrackedRepositoriesNotice } from "./diffs/UntrackedRepositoriesNotice";
+import { AddTrackedFolderDialog } from "./AddTrackedFolderDialog";
+import { getEnvironmentBrowsePlatform } from "./CommandPalette.logic";
+import { useTrackProjectFolder } from "../hooks/useTrackProjectFolder";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
@@ -136,6 +147,7 @@ const ALL_REPOSITORIES = "__all_repositories__";
 const THREAD_FOLDER = "__thread_folder__";
 const NO_GIT_REPOSITORIES: ReturnType<typeof threadChangedRepositories> = Object.freeze([]);
 const NO_TURN_DIFF_SECTIONS: ReadonlyArray<TurnDiffSection> = [];
+const NO_GIT_DIFF_SECTIONS: ReadonlyArray<GitRepositoryDiffSection> = [];
 const DIFF_FILE_TREE_STORAGE_KEY = "t3code.diffFileTreeOpen";
 
 const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
@@ -332,12 +344,46 @@ export default function DiffPanel({
     folders: projectFoldersQuery.data?.folders ?? null,
     threadCwd: activeCwd ?? null,
   });
-  const [gitRepositoryPath, setGitRepositoryPath] = useState<string | null>(null);
-  const gitRepository =
-    gitRepositories.find((repository) => repository.repositoryPath === gitRepositoryPath) ??
-    (threadFolderIsRepo ? null : (gitRepositories[0] ?? null));
+  const threadFolderName = activeProject?.title ?? gt("Project folder");
+  // A repository path, THREAD_FOLDER or ALL_REPOSITORIES; null until the user picks one.
+  const [gitRepositoryChoice, setGitRepositoryChoice] = useState<string | null>(null);
+  const allGitRepositories: ReadonlyArray<ThreadGitRepository> =
+    threadFolderIsRepo && activeCwd
+      ? [{ repositoryPath: activeCwd, name: threadFolderName, cwd: activeCwd }, ...gitRepositories]
+      : gitRepositories;
+  const canShowAllRepositories = allGitRepositories.length > 1;
+  const showsAllRepositories =
+    canShowAllRepositories &&
+    (gitRepositoryChoice ?? (threadFolderIsRepo ? THREAD_FOLDER : ALL_REPOSITORIES)) ===
+      ALL_REPOSITORIES;
+  const gitRepository = showsAllRepositories
+    ? null
+    : (gitRepositories.find((repository) => repository.repositoryPath === gitRepositoryChoice) ??
+      (threadFolderIsRepo ? null : (gitRepositories[0] ?? null)));
+  const gitRepositoryValue = showsAllRepositories
+    ? ALL_REPOSITORIES
+    : (gitRepository?.repositoryPath ?? THREAD_FOLDER);
+  const gitRepositoryLabel = showsAllRepositories
+    ? gt("All repositories")
+    : (gitRepository?.name ?? threadFolderName);
   const gitCwd = gitRepository?.cwd ?? activeCwd;
-  const isGitRepo = threadFolderIsRepo || gitRepository !== null;
+  const isGitRepo = threadFolderIsRepo || gitRepositories.length > 0;
+  // A worktree thread reads its task folder's checkouts, which tracking a folder does not change.
+  const changedFileFolders = useThreadChangedFileFolders(
+    visible && threadWorktreePath === null ? routeThreadRef : null,
+  );
+  const knownFolders = [
+    ...(activeCwd ? [activeCwd] : []),
+    ...(activeProject?.trackedFolders ?? []).map((folder) => folder.path),
+    ...allGitRepositories.map((repository) => repository.cwd),
+  ];
+  const untrackedFolders = untrackedChangeFolders({
+    changedFolders: changedFileFolders,
+    knownFolders,
+  });
+  const trackFolder = useTrackProjectFolder(activeThread?.environmentId ?? null, activeProjectId);
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const canAddFolder = trackFolder.canEdit && threadWorktreePath === null;
   const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
   const orderedTurnDiffSummaries = turnDiffSummaries.toSorted((left, right) => {
     if (left.checkpointTurnCount !== right.checkpointTurnCount) {
@@ -358,7 +404,10 @@ export default function DiffPanel({
     storedDiffSelection.kind !== "turn" &&
     storedDiffSelection.kind !== "tool-call"
       ? { kind: "turn", turnId: latestTurn.runId, filePath: null, revealRequestId: 0 }
-      : storedDiffSelection;
+      : // A commit belongs to one repository.
+        showsAllRepositories && storedDiffSelection.kind === "commit"
+        ? { kind: "branch", baseRef: null }
+        : storedDiffSelection;
   const rememberedBaseRef = useDiffPanelStore((state) =>
     selectThreadBranchBaseRef(state, routeThreadRef),
   );
@@ -400,6 +449,21 @@ export default function DiffPanel({
     diffSelection.kind === "branch" || diffSelection.kind === "commit"
       ? diffSelection.baseRef
       : null;
+  const readsAllRepositories = showsAllRepositories && isGitSelection;
+  const allRepositoriesDiff = useAllRepositoriesGitDiff(
+    {
+      environmentId: activeThread?.environmentId ?? null,
+      repositories: allGitRepositories,
+      threadCwd: activeCwd ?? null,
+      scope: selectedGitScope === "unstaged" ? "working-tree" : "branch-range",
+      ignoreWhitespace: diffIgnoreWhitespace,
+      revision: workspaceMutationId,
+      watchStatuses: visible && canReadFiles && isGitSelection && canShowAllRepositories,
+      readDiffs: visible && canReadFiles && readsAllRepositories,
+      visible,
+    },
+    messages,
+  );
   const selectedFilePath = diffSelection.kind === "turn" ? (diffSelection.filePath ?? null) : null;
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
@@ -415,7 +479,9 @@ export default function DiffPanel({
       ? `turn:${selectedTurn.runId}`
       : selectedCommitSha !== null
         ? `commit:${selectedCommitSha}`
-        : selectedGitScope;
+        : readsAllRepositories
+          ? `all-repositories:${selectedGitScope}`
+          : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
@@ -439,7 +505,7 @@ export default function DiffPanel({
     { enabled: (isGitRepo || hasRepositoryChanges) && selectedTurn !== undefined },
   );
   const branchDiffPreviewInput =
-    canReadFiles && isGitSelection && activeThread && gitCwd
+    canReadFiles && isGitSelection && !readsAllRepositories && activeThread && gitCwd
       ? {
           cwd: gitCwd,
           ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
@@ -472,7 +538,7 @@ export default function DiffPanel({
   const branchDiffPreview = useEnvironmentQuery(branchDiffPreviewAtom, messages);
   const branchDiffPreviewIsPending = useEnvironmentQueryRefresh(branchDiffPreviewAtom).isPending;
   const branchCommitsQuery = useEnvironmentQuery(
-    visible && isGitRepo && canReadFiles && activeThread && gitCwd
+    visible && isGitRepo && canReadFiles && !showsAllRepositories && activeThread && gitCwd
       ? reviewEnvironment.branchCommits({
           environmentId: activeThread.environmentId,
           input: {
@@ -545,9 +611,10 @@ export default function DiffPanel({
     void openLink(url, { event });
   };
   const refreshPreviewQuery = branchDiffPreview.refresh;
-  const refreshDiffFromUserAction = refreshPreviewQuery;
+  const refreshDiffFromUserAction = readsAllRepositories
+    ? allRepositoriesDiff.refresh
+    : refreshPreviewQuery;
 
-  const threadFolderName = activeProject?.title ?? gt("Project folder");
   const preview = branchDiffPreview.data;
   const gitDiff = selectedGitSource?.diff;
 
@@ -567,17 +634,39 @@ export default function DiffPanel({
     diffSelection.kind === "turn" ? (diffSelection.repository ?? null) : null;
   const selectedSection =
     repositorySections.find((section) => section.key === repositoryFilter) ?? null;
-  const shownSections = selectedSection ? [selectedSection] : repositorySections;
+  const gitSections = readsAllRepositories ? allRepositoriesDiff.sections : NO_GIT_DIFF_SECTIONS;
+  const shownSections: ReadonlyArray<TurnDiffSection> = readsAllRepositories
+    ? gitSections
+    : selectedSection
+      ? [selectedSection]
+      : repositorySections;
+  const allRepositoriesFailure =
+    allRepositoriesDiff.failures.length === 0
+      ? null
+      : allRepositoriesDiff.failures
+          .map(({ name, message }) =>
+            gt("{repository}: {error}", { repository: name, error: message }),
+          )
+          .join("\n");
   const selectedPatch = toolCallSelection
     ? toolCallPreview?.patch
     : selectedTurn
       ? shownSections.length > 0
         ? shownSections.map((section) => section.diff).join("\n")
         : activeCheckpointDiff.data?.diff
-      : gitDiff;
+      : readsAllRepositories
+        ? // A repository that failed may hold changes, so its absence is not "no changes".
+          allRepositoriesDiff.loaded && (gitSections.length > 0 || allRepositoriesFailure === null)
+          ? gitSections.map((section) => section.diff).join("\n")
+          : undefined
+        : gitDiff;
+  const previewIncomplete = readsAllRepositories
+    ? allRepositoriesDiff.incomplete
+    : preview?.incomplete === true;
   const isSelectedPatchTruncated =
     toolCallPreview?.truncated === true ||
     (isGitSelection && selectedGitSource?.truncated === true) ||
+    (readsAllRepositories && allRepositoriesDiff.truncated) ||
     (!toolCallSelection &&
       selectedTurn !== undefined &&
       selectedPatch?.endsWith(CHECKPOINT_DIFF_TRUNCATED_MARKER) === true);
@@ -586,20 +675,23 @@ export default function DiffPanel({
     : selectedTurn
       ? activeCheckpointDiff
       : branchDiffPreview;
-  const isLoadingSelectedPatch =
-    selectedPatchQuery.isPending &&
-    (selectedPatchQuery.data === null ||
-      (isGitSelection && preview?.incomplete === true && selectedGitSource?.files?.length === 0));
+  const isLoadingSelectedPatch = readsAllRepositories
+    ? !allRepositoriesDiff.loaded
+    : selectedPatchQuery.isPending &&
+      (selectedPatchQuery.data === null ||
+        (isGitSelection && preview?.incomplete === true && selectedGitSource?.files?.length === 0));
   const selectedPatchError = toolCallSelection
     ? toolCallDetail.error
     : selectedTurn
       ? activeCheckpointDiff.error
-      : branchDiffPreview.error;
+      : readsAllRepositories
+        ? allRepositoriesFailure
+        : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges =
     hasResolvedPatch &&
     selectedPatch.trim().length === 0 &&
-    !preview?.incomplete &&
+    !previewIncomplete &&
     (!selectedGitSource?.patchesDeferred || selectedGitSource.files?.length === 0);
   const lazySource =
     isGitSelection &&
@@ -655,7 +747,8 @@ export default function DiffPanel({
     }
     return currentLoadDiffFiles(fileDiff);
   });
-  const canSelectBranchBase = canReadFiles && canRefreshGitDiff && selectedGitScope === "branch";
+  const canSelectBranchBase =
+    canReadFiles && canRefreshGitDiff && selectedGitScope === "branch" && !readsAllRepositories;
   const branchRefsCwd = branchDiffPreview.data?.cwd ?? gitCwd;
   const localBranchRefs = useEnvironmentQuery(
     canSelectBranchBase && activeThread && branchRefsCwd
@@ -742,7 +835,9 @@ export default function DiffPanel({
     },
   );
 
-  const isRefreshingDiff = branchDiffPreview.isPending || areFilePatchesPending;
+  const isRefreshingDiff = readsAllRepositories
+    ? allRepositoriesDiff.isPending
+    : branchDiffPreview.isPending || areFilePatchesPending;
   const pathOccurrences = new Map<string, number>();
   const renderableFileEntries = buildFileDiffEntries(renderableFiles).map((entry) => {
     if (!isGitSelection) return entry;
@@ -848,6 +943,16 @@ export default function DiffPanel({
   // A tracked repository's file is named from the thread's folder; on disk it belongs to the
   // repository's own folder, which may sit outside the thread's.
   const repositoryFileTarget = (filePath: string) => {
+    if (readsAllRepositories) {
+      const match = repositorySectionForPath(gitSections, filePath);
+      return match === null
+        ? null
+        : {
+            path: match.path,
+            insideThreadFolder: match.section.insideThreadFolder,
+            cwd: match.section.cwd,
+          };
+    }
     // A Git scope of a repository lists paths from that repository's folder.
     if (isGitSelection && gitRepository !== null) {
       return { path: filePath, insideThreadFolder: false, cwd: gitRepository.cwd };
@@ -931,9 +1036,8 @@ export default function DiffPanel({
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
   const selectGitRepository = (value: string) => {
-    const nextPath = value === THREAD_FOLDER ? null : value;
-    if (nextPath === (gitRepository?.repositoryPath ?? null)) return;
-    setGitRepositoryPath(nextPath);
+    if (value === gitRepositoryValue) return;
+    setGitRepositoryChoice(value);
     // A commit or base ref of the repository being left means nothing in the next one.
     if (selectedCommitSha === null && rememberedBaseRef === null) return;
     selectBranchBaseRef(null);
@@ -1071,7 +1175,7 @@ export default function DiffPanel({
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            {turnDiffsOnly ? null : (
+            {turnDiffsOnly || showsAllRepositories ? null : (
               <DropdownMenuSub
                 onOpenChange={(open) => {
                   setOpenCommitMenu(open ? (branchCommitsQuery.data ?? null) : null);
@@ -1181,33 +1285,59 @@ export default function DiffPanel({
             <DropdownMenuTrigger
               render={<Button size="xs" variant="ghost-muted" />}
               className="min-w-14 max-w-48 shrink"
-              aria-label={gt("Repository: {name}", {
-                name: gitRepository?.name ?? threadFolderName,
-              })}
+              aria-label={gt("Repository: {name}", { name: gitRepositoryLabel })}
             >
-              <span className="truncate">{gitRepository?.name ?? threadFolderName}</span>
+              <span className="truncate">{gitRepositoryLabel}</span>
               <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-80 max-w-72">
+            <DropdownMenuContent align="start" className="max-h-80 max-w-80">
               <DropdownMenuRadioGroup
-                value={gitRepository?.repositoryPath ?? THREAD_FOLDER}
+                value={gitRepositoryValue}
                 onValueChange={selectGitRepository}
               >
-                {threadFolderIsRepo ? (
-                  <DropdownMenuRadioItem value={THREAD_FOLDER} closeOnClick>
-                    <span className="min-w-0 truncate">{threadFolderName}</span>
+                {canShowAllRepositories ? (
+                  <DropdownMenuRadioItem value={ALL_REPOSITORIES} closeOnClick>
+                    <span>
+                      <T>All repositories</T>
+                    </span>
                   </DropdownMenuRadioItem>
                 ) : null}
-                {gitRepositories.map((repository) => (
-                  <DropdownMenuRadioItem
-                    key={repository.repositoryPath}
-                    value={repository.repositoryPath}
-                    closeOnClick
-                  >
-                    <span className="min-w-0 truncate">{repository.name}</span>
-                  </DropdownMenuRadioItem>
-                ))}
+                {allGitRepositories.map((repository) => {
+                  // Two checkouts can share a name or a branch; together they tell them apart.
+                  const branch = allRepositoriesDiff.statuses.get(
+                    repository.repositoryPath,
+                  )?.refName;
+                  return (
+                    <DropdownMenuRadioItem
+                      key={repository.repositoryPath}
+                      value={
+                        repository.repositoryPath === activeCwd && threadFolderIsRepo
+                          ? THREAD_FOLDER
+                          : repository.repositoryPath
+                      }
+                      closeOnClick
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="min-w-0 truncate">{repository.name}</span>
+                        {branch ? (
+                          <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
+                            {branch}
+                          </span>
+                        ) : null}
+                      </span>
+                    </DropdownMenuRadioItem>
+                  );
+                })}
               </DropdownMenuRadioGroup>
+              {canAddFolder ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setIsAddingFolder(true)}>
+                    <PlusIcon className="size-3.5" />
+                    <T>Add a repository to the project...</T>
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -1574,6 +1704,17 @@ export default function DiffPanel({
     </>
   );
 
+  const untrackedNotice =
+    activeThread && activeProjectId && !toolCallSelection && untrackedFolders.length > 0 ? (
+      <UntrackedRepositoriesNotice
+        environmentId={activeThread.environmentId}
+        projectId={activeProjectId}
+        folders={untrackedFolders}
+        knownFolders={knownFolders}
+        onTracked={projectFoldersQuery.refresh}
+      />
+    ) : null;
+
   return (
     <DiffPanelShell mode={mode} header={headerRow}>
       {!activeThread ? (
@@ -1581,9 +1722,12 @@ export default function DiffPanel({
           <T>Select a thread to inspect turn diffs.</T>
         </div>
       ) : !isGitRepo && !hasRepositoryChanges && !toolCallSelection ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          <T>Turn diffs are unavailable because this project is not a git repository.</T>
-        </div>
+        <>
+          {untrackedNotice}
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            <T>Turn diffs are unavailable because this project is not a git repository.</T>
+          </div>
+        </>
       ) : selectedRunId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           <T>No completed turns yet.</T>
@@ -1599,7 +1743,8 @@ export default function DiffPanel({
       ) : (
         <>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-            {preview?.incomplete && (
+            {untrackedNotice}
+            {previewIncomplete && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
                 {selectedPatchError
                   ? gt(
@@ -1610,11 +1755,23 @@ export default function DiffPanel({
             )}
             {isSelectedPatchTruncated && !lazySource && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
-                {isGitSelection && selectedGitSource?.files && !preview?.incomplete
+                {readsAllRepositories
                   ? gt(
-                      "This preview exceeds the size limit. Changes shown are incomplete. Totals include all changes.",
+                      "Some repositories exceed the size limit. Pick one repository to see all of its changes.",
                     )
-                  : gt("This preview exceeds the size limit. Changes shown are incomplete.")}
+                  : isGitSelection && selectedGitSource?.files && !preview?.incomplete
+                    ? gt(
+                        "This preview exceeds the size limit. Changes shown are incomplete. Totals include all changes.",
+                      )
+                    : gt("This preview exceeds the size limit. Changes shown are incomplete.")}
+              </p>
+            )}
+            {readsAllRepositories && allRepositoriesDiff.omittedCount > 0 && (
+              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
+                {gt(
+                  "{count, plural, one {{count} more repository is left out. Pick it from the repository menu.} other {{count} more repositories are left out. Pick one from the repository menu.}}",
+                  { count: allRepositoriesDiff.omittedCount },
+                )}
               </p>
             )}
             {omittedToolCallFiles > 0 && (
@@ -1628,7 +1785,7 @@ export default function DiffPanel({
                 )}
               </p>
             )}
-            {selectedPatchError && !renderablePatch && (
+            {selectedPatchError && (!renderablePatch || readsAllRepositories) && (
               <div className="px-3">
                 <p className="mb-2 text-2xs text-error/80">{selectedPatchError}</p>
               </div>
@@ -1824,6 +1981,23 @@ export default function DiffPanel({
           </div>
         </>
       )}
+      {isAddingFolder && activeThread && activeProject ? (
+        <AddTrackedFolderDialog
+          environmentId={activeThread.environmentId}
+          workspaceRoot={activeProject.workspaceRoot}
+          platform={getEnvironmentBrowsePlatform(serverConfig?.environment.platform.os)}
+          canBrowse={canReadFiles}
+          busy={trackFolder.busy}
+          onAdd={(folder) => {
+            void trackFolder.track(folder).then((tracked) => {
+              if (!tracked) return;
+              setIsAddingFolder(false);
+              projectFoldersQuery.refresh();
+            });
+          }}
+          onClose={() => setIsAddingFolder(false)}
+        />
+      ) : null}
     </DiffPanelShell>
   );
 }

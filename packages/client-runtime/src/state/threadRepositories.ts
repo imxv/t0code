@@ -363,11 +363,11 @@ export function turnDiffSections(
  * The repository section a thread-relative path belongs to, and the path inside that repository.
  * Null for a file of the thread's own folder.
  */
-export function repositorySectionForPath(
-  sections: ReadonlyArray<TurnDiffSection>,
+export function repositorySectionForPath<Section extends TurnDiffSection>(
+  sections: ReadonlyArray<Section>,
   filePath: string,
-): { readonly section: TurnDiffSection; readonly path: string } | null {
-  let match: { readonly section: TurnDiffSection; readonly path: string } | null = null;
+): { readonly section: Section; readonly path: string } | null {
+  let match: { readonly section: Section; readonly path: string } | null = null;
   for (const section of sections) {
     if (section.repositoryPath === null || section.relativePath === "") continue;
     const prefix = `${section.relativePath}/`;
@@ -377,6 +377,143 @@ export function repositorySectionForPath(
     }
   }
   return match;
+}
+
+/** How many repositories "All repositories" reads Git changes of; the rest stay a pick away. */
+export const ALL_REPOSITORIES_GIT_MAX = 8;
+
+export type RepositoryGitScope = "working-tree" | "branch-range";
+
+/** Whether a repository has changes in a Git scope, by its status; null until the status arrives. */
+export function repositoryHasGitChanges(
+  status: Pick<VcsStatusResult, "isRepo" | "hasWorkingTreeChanges" | "branchChanges"> | null,
+  scope: RepositoryGitScope,
+): boolean | null {
+  if (status === null) return null;
+  if (!status.isRepo) return false;
+  if (status.hasWorkingTreeChanges) return true;
+  if (scope === "working-tree") return false;
+  // Older servers leave the branch totals out; only reading the range can tell then.
+  const totals = status.branchChanges;
+  return totals === undefined || totals.insertions + totals.deletions > 0;
+}
+
+/** One repository's patch in an all-repositories Git diff. */
+export interface GitRepositoryDiffSection extends TurnDiffSection {
+  readonly repositoryPath: string;
+  /** The folder Git ran in; the section's paths are relative to it. */
+  readonly cwd: string;
+  /** False when the files open from `cwd` rather than from the thread's folder. */
+  readonly insideThreadFolder: boolean;
+}
+
+/**
+ * Several repositories' Git patches, in the given order, each under a folder that keeps its files
+ * apart: its place inside the thread's folder, or else its name. Names would be ambiguous beside
+ * the thread folder's own files, so a repository outside it then keeps its `../` path.
+ */
+export function gitRepositoryDiffSections(input: {
+  readonly repositories: ReadonlyArray<ThreadGitRepository & { readonly diff: string }>;
+  readonly threadCwd: string | null;
+}): ReadonlyArray<GitRepositoryDiffSection> {
+  const placed = input.repositories
+    .filter((repository) => repository.diff.trim() !== "")
+    .map((repository) => {
+      const fromThread =
+        input.threadCwd === null ? undefined : relativeFolderPath(input.threadCwd, repository.cwd);
+      return {
+        repository,
+        fromThread,
+        inside: fromThread !== undefined && isRelativePathInsideFolder(fromThread),
+      };
+    });
+  const besideRootFiles = placed.some((entry) => entry.fromThread === "");
+  const taken = new Set(
+    placed.flatMap((entry) =>
+      entry.inside && entry.fromThread ? [entry.fromThread.split("/")[0]!] : [],
+    ),
+  );
+  return placed.map(({ repository, fromThread, inside }) => {
+    let folder: string;
+    if (inside || (besideRootFiles && fromThread !== undefined)) {
+      folder = fromThread!;
+    } else {
+      const name = repository.name.replaceAll(/[\\/]/g, "-");
+      folder = name;
+      for (let copy = 2; taken.has(folder); copy += 1) folder = `${name} (${copy})`;
+      taken.add(folder);
+    }
+    return {
+      key: repository.repositoryPath,
+      name: repository.name,
+      repositoryPath: repository.repositoryPath,
+      relativePath: folder,
+      diff: repository.diff,
+      cwd: repository.cwd,
+      insideThreadFolder: inside,
+    };
+  });
+}
+
+/** How many folders outside a project a thread's file changes are traced back to at once. */
+const UNTRACKED_CHANGE_FOLDERS_MAX = 4;
+// Bounds what a long thread keeps for the check above.
+const CHANGED_FILE_FOLDERS_MAX = 32;
+
+/**
+ * The folders holding a thread's changed files, the latest change first. Only absolute paths
+ * count: a provider names a file of the thread's own folder relatively.
+ */
+export function changedFileFolders(filePaths: ReadonlyArray<string>): ReadonlyArray<string> {
+  const folders: Array<string> = [];
+  for (let index = filePaths.length - 1; index >= 0; index -= 1) {
+    const filePath = filePaths[index]!;
+    if (!isAbsolutePath(filePath)) continue;
+    const separator = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+    const folder = filePath.slice(0, separator);
+    // A file at a filesystem root has no folder worth tracking.
+    if ((pathSegments(folder)?.segments.length ?? 0) === 0 || folders.includes(folder)) continue;
+    folders.push(folder);
+    if (folders.length === CHANGED_FILE_FOLDERS_MAX) break;
+  }
+  return folders;
+}
+
+/** Changed folders that none of `knownFolders` holds, at most `UNTRACKED_CHANGE_FOLDERS_MAX`. */
+export function untrackedChangeFolders(input: {
+  readonly changedFolders: ReadonlyArray<string>;
+  readonly knownFolders: ReadonlyArray<string>;
+}): ReadonlyArray<string> {
+  return input.changedFolders
+    .filter((folder) =>
+      input.knownFolders.every((known) => {
+        const relative = relativeFolderPath(known, folder);
+        return relative === undefined || !isRelativePathInsideFolder(relative);
+      }),
+    )
+    .slice(0, UNTRACKED_CHANGE_FOLDERS_MAX);
+}
+
+/**
+ * The repositories to offer for tracking, from the root each untracked changed folder resolved to
+ * (null when it is in none), once each. A repository on either side of a known folder is left
+ * out: one around it, such as a home folder kept in Git, would take in the project's own.
+ */
+export function untrackedChangeRepositories(input: {
+  readonly repositoryRoots: ReadonlyArray<string | null>;
+  readonly knownFolders: ReadonlyArray<string>;
+}): ReadonlyArray<{ readonly path: string; readonly name: string }> {
+  const within = (folder: string, root: string) => {
+    const relative = relativeFolderPath(root, folder);
+    return relative !== undefined && isRelativePathInsideFolder(relative);
+  };
+  const seen = new Set<string>();
+  return input.repositoryRoots.flatMap((root) => {
+    if (root === null || seen.has(root)) return [];
+    seen.add(root);
+    if (input.knownFolders.some((known) => within(known, root) || within(root, known))) return [];
+    return [{ path: root, name: root.replaceAll("\\", "/").split("/").findLast(Boolean) ?? root }];
+  });
 }
 
 /** How many repository sections a thread shows before the rest fold behind "Show N more". */

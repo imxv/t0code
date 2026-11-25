@@ -60,6 +60,7 @@ vi.mock("~/state/review", () => ({
     diffFilePatch: () => state.patch,
     diffFileContents: {},
   },
+  repositoryDiffPreviewsAtom: vi.fn(),
 }));
 vi.mock("~/state/vcs", () => ({
   vcsEnvironment: {
@@ -67,6 +68,7 @@ vi.mock("~/state/vcs", () => ({
     listRefs: ({ input }: { input: { refKind: "local" | "remote" } }) =>
       input.refKind === "local" ? state.localRefs : state.remoteRefs,
   },
+  repositoryStatusesAtom: vi.fn(),
 }));
 vi.mock("~/state/entities", () => ({
   useQuietThreadShell: () => state.thread,
@@ -74,12 +76,16 @@ vi.mock("~/state/entities", () => ({
   useThreadCheckpointSummaries: () => state.checkpoints,
   useQuietThreadVisibleTurnItems: () => [],
   useQuietThreadProjection: () => null,
+  useThreadChangedFileFolders: () => [],
 }));
 vi.mock("~/state/filesystem", () => ({
   useFilesystemReadAccess: () => ({ canReadFiles: true, isPending: false, error: null }),
   filesystemEnvironment: {},
 }));
-vi.mock("~/hooks/useThreadRouteTarget", () => ({ useThreadRouteRef: () => state.threadRef }));
+vi.mock("~/hooks/useThreadRouteTarget", () => ({
+  useThreadRouteRef: () => state.threadRef,
+  useThreadRouteTarget: () => null,
+}));
 vi.mock("~/hooks/useSettings", () => ({
   useClientSettings: (select: (settings: ClientSettings) => unknown) =>
     select({ ...DEFAULT_CLIENT_SETTINGS, diffFilesCollapsed: state.diffFilesCollapsed }),

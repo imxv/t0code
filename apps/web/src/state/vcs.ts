@@ -3,6 +3,7 @@ import {
   createVcsEnvironmentAtoms,
   createVcsStatusRevalidationAtomFamily,
 } from "@t3tools/client-runtime/state/vcs";
+import type { EnvironmentId } from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -37,4 +38,21 @@ export const vcsBranchRevalidation = createVcsStatusRevalidationAtomFamily({
   refreshStatus: vcsEnvironment.refreshBranch,
   subscribeWake: subscribeDocumentReturn,
   wakeDebounceMs: 250,
+});
+
+/**
+ * Several checkouts' statuses, each revalidated when the user comes back to the window. Keyed by
+ * the JSON of `{ environmentId, cwds }`.
+ */
+export const repositoryStatusesAtom = Atom.family((key: string) => {
+  const { environmentId, cwds } = JSON.parse(key) as {
+    readonly environmentId: EnvironmentId;
+    readonly cwds: ReadonlyArray<string>;
+  };
+  const statuses = cwds.map((cwd) => vcsEnvironment.status({ environmentId, input: { cwd } }));
+  const revalidations = cwds.map((cwd) => vcsStatusRevalidation({ environmentId, cwd }));
+  return Atom.make((get) => {
+    for (const revalidation of revalidations) get(revalidation);
+    return statuses.map((status) => get(status));
+  });
 });

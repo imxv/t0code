@@ -30,6 +30,7 @@ import type {
   TurnItemId,
 } from "@t3tools/contracts";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
+import { changedFileFolders } from "@t3tools/client-runtime/state/thread-repositories";
 import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
@@ -66,6 +67,9 @@ const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pip
 );
 const EMPTY_VISIBLE_TURN_ITEMS_ATOM = Atom.make(EMPTY_VISIBLE_TURN_ITEMS).pipe(
   Atom.withLabel("web-thread-visible-turn-items:empty"),
+);
+const EMPTY_CHANGED_FILE_FOLDERS_ATOM = Atom.make<ReadonlyArray<string>>(Object.freeze([])).pipe(
+  Atom.withLabel("web-thread-changed-file-folders:empty"),
 );
 const EMPTY_CHECKPOINT_SUMMARIES_ATOM = Atom.make<ReadonlyArray<ThreadCheckpointSummary>>(
   Object.freeze([]),
@@ -266,6 +270,31 @@ export function useAssistantMessageText(
     ref === null || itemId === undefined
       ? EMPTY_ASSISTANT_MESSAGE_TEXT_ATOM
       : environmentThreadDetails.assistantMessageTextAtom(ref, itemId),
+  );
+}
+
+// The same list while the folders stay the same, so a reader re-renders only when they change.
+const changedFileFoldersAtomFamily = Atom.family((key: string) => {
+  const ref = parseThreadKey(key);
+  let previous: ReadonlyArray<string> = [];
+  return Atom.make((get) => {
+    const filePaths: Array<string> = [];
+    for (const { item } of get(environmentThreadDetails.quietVisibleTurnItemsAtom(ref))) {
+      if (item.type !== "file_change") continue;
+      if (item.changes === undefined || item.changes.length === 0) filePaths.push(item.fileName);
+      else for (const change of item.changes) filePaths.push(change.path);
+    }
+    const next = changedFileFolders(filePaths);
+    if (arrayElementsEqual(previous, next)) return previous;
+    previous = next;
+    return next;
+  }).pipe(Atom.withLabel(`web-thread-changed-file-folders:${key}`));
+});
+
+/** The folders holding files the thread's own file changes named by absolute path, latest first. */
+export function useThreadChangedFileFolders(ref: ScopedThreadRef | null): ReadonlyArray<string> {
+  return useAtomValue(
+    ref === null ? EMPTY_CHANGED_FILE_FOLDERS_ATOM : changedFileFoldersAtomFamily(threadKey(ref)),
   );
 }
 

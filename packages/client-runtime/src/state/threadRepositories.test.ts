@@ -14,11 +14,14 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveThreadCheckpointSummaries } from "./threadCheckpoints.ts";
 import {
   addableTaskFolderRepositories,
+  changedFileFolders,
   deriveTurnRepositoryChanges,
+  gitRepositoryDiffSections,
   pinnableThreadRepositories,
   pinThreadRepository,
   repositoryCheckpointScopeIds,
   repositoryFilePath,
+  repositoryHasGitChanges,
   repositorySectionForPath,
   resolveWorktreeRepositorySelection,
   rewindFileRestore,
@@ -29,6 +32,8 @@ import {
   threadRepositoryScopes,
   threadRepositorySections,
   unpinThreadRepository,
+  untrackedChangeFolders,
+  untrackedChangeRepositories,
   turnChanges,
   turnDiffSections,
   turnHasChanges,
@@ -622,5 +627,115 @@ describe("turnDiffSections", () => {
     expect(repositorySectionForPath(sections, "../shared/x.ts")?.path).toBe("x.ts");
     expect(repositorySectionForPath(sections, "README.md")).toBeNull();
     expect(repositorySectionForPath(sections, "apiary/x.ts")).toBeNull();
+  });
+});
+
+describe("all repositories Git diff", () => {
+  const repository = (cwd: string, name: string, diff = `diff ${name}\n`) => ({
+    repositoryPath: cwd,
+    name,
+    cwd,
+    diff,
+  });
+
+  it("names repositories outside a plain thread folder by name, apart from each other", () => {
+    const sections = gitRepositoryDiffSections({
+      threadCwd: "/projects/coin",
+      repositories: [
+        repository("/work/shop", "shop"),
+        repository("/work/clean", "clean", ""),
+        repository("/projects/coin/packages/api", "api"),
+        repository("/wt/a/shop", "shop"),
+        repository("/work/packages", "packages"),
+      ],
+    });
+    expect(
+      sections.map(({ name, relativePath, insideThreadFolder }) => [
+        name,
+        relativePath,
+        insideThreadFolder,
+      ]),
+    ).toEqual([
+      ["shop", "shop", false],
+      ["api", "packages/api", true],
+      ["shop", "shop (2)", false],
+      ["packages", "packages (2)", false],
+    ]);
+    const match = repositorySectionForPath(sections, "shop (2)/src/a.ts");
+    expect([match?.section.cwd, match?.path]).toEqual(["/wt/a/shop", "src/a.ts"]);
+  });
+
+  it("keeps the path of a repository outside a thread folder that has files of its own", () => {
+    const sections = gitRepositoryDiffSections({
+      threadCwd: "/work/app",
+      repositories: [repository("/work/app", "app"), repository("/work/lib", "lib")],
+    });
+    expect(sections.map(({ relativePath }) => relativePath)).toEqual(["", "../lib"]);
+    expect(repositorySectionForPath(sections, "src/a.ts")).toBeNull();
+  });
+
+  it("reads changes of a scope from a repository's status", () => {
+    const status = (
+      hasWorkingTreeChanges: boolean,
+      branchChanges?: { insertions: number; deletions: number },
+    ) => ({
+      isRepo: true,
+      hasWorkingTreeChanges,
+      ...(branchChanges === undefined
+        ? {}
+        : { branchChanges: { baseRef: null, ...branchChanges } }),
+    });
+    expect(repositoryHasGitChanges(null, "working-tree")).toBeNull();
+    expect(repositoryHasGitChanges({ ...status(true), isRepo: false }, "branch-range")).toBe(false);
+    expect(repositoryHasGitChanges(status(true), "working-tree")).toBe(true);
+    expect(
+      repositoryHasGitChanges(status(false, { insertions: 3, deletions: 0 }), "working-tree"),
+    ).toBe(false);
+    expect(
+      repositoryHasGitChanges(status(false, { insertions: 3, deletions: 0 }), "branch-range"),
+    ).toBe(true);
+    expect(
+      repositoryHasGitChanges(status(false, { insertions: 0, deletions: 0 }), "branch-range"),
+    ).toBe(false);
+    expect(repositoryHasGitChanges(status(false), "branch-range")).toBe(true);
+  });
+});
+
+describe("untracked change folders", () => {
+  it("lists the folders of absolute changed paths, the latest first, once each", () => {
+    expect(
+      changedFileFolders([
+        "/work/shop/src/a.ts",
+        "src/relative.ts",
+        "/work/coin/src/b.ts",
+        "/root-file.ts",
+        "/work/shop/src/c.ts",
+        "C:\\repos\\api\\main.go",
+      ]),
+    ).toEqual(["C:\\repos\\api", "/work/shop/src", "/work/coin/src"]);
+  });
+
+  it("drops folders a known folder holds and caps the rest", () => {
+    expect(
+      untrackedChangeFolders({
+        changedFolders: ["/work/shop/src", "/work/coin/src", "/projects/app/lib", "/tmp/a"],
+        knownFolders: ["/work/shop", "/projects/app"],
+      }),
+    ).toEqual(["/work/coin/src", "/tmp/a"]);
+    expect(
+      untrackedChangeFolders({
+        changedFolders: ["/a", "/b", "/c", "/d", "/e"],
+        knownFolders: [],
+      }),
+    ).toEqual(["/a", "/b", "/c", "/d"]);
+  });
+
+  it("offers each repository once, and none around or inside a known folder", () => {
+    expect(
+      untrackedChangeRepositories({
+        repositoryRoots: ["/work/coin", null, "/work/coin", "/home/me", "/work/shop/vendor/x"],
+        knownFolders: ["/home/me/project", "/work/shop"],
+      }),
+    ).toEqual([{ path: "/work/coin", name: "coin" }]);
   });
 });

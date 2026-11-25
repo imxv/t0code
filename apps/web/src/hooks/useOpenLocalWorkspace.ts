@@ -17,7 +17,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
-import { reportProjectFailure } from "./useProjectGroupUpdate";
+import { reportProjectFailure } from "./reportProjectFailure";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { APP_BASE_NAME } from "~/branding";
 
