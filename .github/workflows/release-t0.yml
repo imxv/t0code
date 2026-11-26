@@ -159,7 +159,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "T0 Code $VERSION" \
-              --notes "T0 Code $VERSION for macOS (Apple silicon)." \
+              --notes "T0 Code $VERSION for macOS (Apple silicon). Unofficial fork of T3 Code." \
               --latest
           fi
 
