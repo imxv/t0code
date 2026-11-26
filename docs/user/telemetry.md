@@ -20,13 +20,7 @@ T3 Connect sends connection timings, request paths, environment/thread IDs, and 
 
 ## Agent feedback
 
-Optional tool for agents to report T3 Code bugs or missing capabilities. Configure in **Settings → Labs → Agent feedback**:
-
-- **Off** (default): Feedback tools and `t3 feedback` are disabled.
-- **When I ask**: Agents submit a report only when you ask, shown as an interactive approval card before anything leaves your machine.
-- **Automatic**: Also sends minimal automated reports (problem kind + tool/command name only—no text or conversation) when an agent hits a T3 tool failure; enables `t3 feedback` CLI reporting (up to 10/hour).
-
-Approval cards show exact payloads (expected/actual/workaround, turn outline with no text, and optional **Include the conversation** up to 16 KB). File paths, usernames, hostnames, git remotes, and secret-like strings are scrubbed before saving, and reports use one-off random IDs. Inspect local reports with `t3 feedback list [--json]`.
+T0 Code turns agent feedback off and hides its setting. Upstream T3 Code uses it to send agent bug reports to the T3 team, so T0 Code never offers the feedback tool to agents, whatever `settings.json` says. Report T0 Code problems in [this repository's issues](https://github.com/imxv/t0code/issues).
 
 ## Agent activity for mobile notifications
 

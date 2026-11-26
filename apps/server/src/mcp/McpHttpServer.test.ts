@@ -1857,7 +1857,7 @@ it.effect("hides tools for links and refuses another environment while the beta 
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-it.effect("offers agent feedback tools only while the setting is on, to every client", () =>
+it.effect("never offers agent feedback tools in T0 Code, even with the setting on", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const agentScope: McpInvocationContext.McpThreadInvocationScope = {
@@ -1978,9 +1978,9 @@ it.effect("offers agent feedback tools only while the setting is on, to every cl
       }
 
       yield* settings.updateSettings({ agentFeedback: { mode: "on-request" } });
-      expect(yield* found).toEqual(expect.arrayContaining(["t3_feedback"]));
+      expect(yield* found).toEqual([]);
       for (const token of ["agentToken", "cliToken"]) {
-        expect(yield* listed(token)).toEqual(["t3_feedback"]);
+        expect(yield* listed(token)).toEqual([]);
       }
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),

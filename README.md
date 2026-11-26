@@ -12,6 +12,7 @@ The fork follows upstream closely. It regularly merges the latest upstream chang
 ## How it differs from T3 Code
 
 - **Telemetry is off by default.** Usage events and relay traces are sent only if you set `T3CODE_TELEMETRY_ENABLED=true`.
+- **No agent feedback or triage.** Both send reports to T3, so T0 Code turns them off. Report problems here instead.
 - **Sidebar status filter.** Filter threads by Working, Needs you, Done, and Draft.
 - **Side chat results** appear in the parent thread's sidebar row.
 - **Projects can span several folders.** The diff panel shows git changes across all of a project's repositories.

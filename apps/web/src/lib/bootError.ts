@@ -376,12 +376,17 @@ export function showBootError(error: unknown) {
           ),
         ]
       : []),
-    element("div", {}, [
-      element("p", {
-        textContent: `Run this on the computer that runs ${APP_BASE_NAME}. Your agent can check the local logs and help you file a bug report.`,
-      }),
-      element("div", { id: "boot-error-command" }, [command, copyCommand]),
-    ]),
+    // `t3 triage` files to T3's tracker, so T0 Code offers only its own issue link.
+    ...(IS_T0_DESKTOP
+      ? []
+      : [
+          element("div", {}, [
+            element("p", {
+              textContent: `Run this on the computer that runs ${APP_BASE_NAME}. Your agent can check the local logs and help you file a bug report.`,
+            }),
+            element("div", { id: "boot-error-command" }, [command, copyCommand]),
+          ]),
+        ]),
     element("div", {}, [
       details,
       element("p", {

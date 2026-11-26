@@ -296,7 +296,8 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const settingsFlags = serverSettings.getSettings.pipe(
     Effect.map((settings) => ({
       linkedEnvironments: settings.linkedEnvironmentsEnabled,
-      agentFeedback: settings.agentFeedback.mode,
+      // T0 Code: agent feedback reports to T3's analytics, so it stays off whatever the setting says.
+      agentFeedback: "off" as const,
       workflows: settings.workflowsEnabled,
     })),
     Effect.orElseSucceed(() => ({

@@ -1,5 +1,8 @@
 # Triage an issue
 
+> [!NOTE]
+> T0 Code has no **Triage an issue** command. Triage files its reports in T3 Code's issue tracker, so it does not suit an unofficial fork. Report T0 Code problems in [this repository's issues](https://github.com/imxv/t0code/issues). The rest of this page describes upstream T3 Code.
+
 Let your own coding agent investigate a T3 Code problem—reading local logs/state, inspecting the source for your installed version, checking known issues, and helping draft a GitHub issue. The agent always asks before applying fixes or posting anything.
 
 ## In the app

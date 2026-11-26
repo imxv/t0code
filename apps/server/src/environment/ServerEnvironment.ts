@@ -280,7 +280,8 @@ export const make = Effect.gen(function* () {
       projectOrganization: true,
       ignoredFileListing: true,
       ignoredFileSearch: true,
-      triage: true,
+      // T0 Code leaves out `triage` and `agentFeedback`: both report to T3's issue tracker and
+      // analytics, so clients hide their entry points.
       oneTimeSchedules: true,
       freshContext: true,
       scheduledTaskThreadModes: true,
@@ -306,7 +307,6 @@ export const make = Effect.gen(function* () {
       mcpHostedApproval: true,
       shellThreadFamilies: true,
       shellOlderSettled: true,
-      agentFeedback: true,
     },
   };
 
