@@ -288,8 +288,10 @@ import { SidebarStatusFilterBar } from "./sidebar/SidebarStatusFilterBar";
 import {
   applySidebarStatusFilter,
   resolveSidebarThreadShellBucket,
+  unsentDraftThreadKeys,
 } from "./sidebar/sidebarStatusFilter.logic";
 import { useSidebarStatusFilterStore } from "./sidebar/sidebarStatusFilterStore";
+import { useShallow } from "zustand/react/shallow";
 import {
   SidebarDragBoundary,
   SidebarSectionHeader,
@@ -495,6 +497,7 @@ function useSidebarThreads(input: {
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const statusBuckets = useSidebarStatusFilterStore((store) => store.buckets);
   const localLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
+  const draftThreadKeys = new Set(useComposerDraftStore(useShallow(unsentDraftThreadKeys)));
   // A status filter opens every folder; closing one then lasts only for that filter.
   const statusFilterKey = statusBuckets.join(",");
   const [filterClosedFolders, setFilterClosedFolders] = useState({
@@ -535,6 +538,7 @@ function useSidebarThreads(input: {
     pinned: partition.pinnedThreads,
     active: partition.activeThreads,
     working: partition.workingThreads,
+    shelved: [...partition.snoozedThreads, ...partition.settledThreads],
     keyOf: threadShellKey,
     bucketOf: (thread) =>
       resolveSidebarThreadShellBucket(
@@ -542,6 +546,11 @@ function useSidebarThreads(input: {
         localLastVisitedAtById[threadShellKey(thread)],
         partition.snoozeNow,
       ),
+    // Like the row's pen, the open thread's own draft isn't one left behind.
+    hasDraft: (thread) => {
+      const key = threadShellKey(thread);
+      return key !== routeRowThreadKey && draftThreadKeys.has(key);
+    },
     routeKey: routeRowThreadKey,
   });
   const statusFiltered = statusFilter.filtered;
@@ -1103,6 +1112,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const projectGroupsRef = useRef(projectGroups);
   const persistedProjectScopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
   const setStatusBuckets = useSidebarStatusFilterStore((store) => store.setBuckets);
+  const statusFilterShowsDrafts = useSidebarStatusFilterStore((store) =>
+    store.buckets.includes("draft"),
+  );
   const setPersistedProjectScopeKeys = useUiStateStore((store) => store.setSidebarProjectScopeKeys);
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
@@ -1550,12 +1562,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   // Draft rows sit above the threads, so jumps and traversal reach them first.
   // Search hides them, so they drop out while it is open.
-  // A status filter hides them too, but keeps the one on screen.
+  // A status filter hides them too, but keeps the one on screen, unless it shows drafts.
   const listedDraftIds = isSearchingThreads
     ? EMPTY_DRAFT_IDS
-    : statusFiltering
+    : statusFiltering && !statusFilterShowsDrafts
       ? draftIds.filter((id) => id === routeDraftIdForRows)
       : draftIds;
+  const sidebarStatusCounts = {
+    ...statusCounts,
+    draft: statusCounts.draft + draftIds.filter((id) => id !== routeDraftIdForRows).length,
+  };
   const draftIdByRowKey = new Map<string, DraftId>(listedDraftIds.map((id) => [`draft:${id}`, id]));
   const orderedRowKeys = [...draftIdByRowKey.keys(), ...orderedThreadKeys];
   const routeDraftRowKey = `draft:${routeDraftIdForRows}`;
@@ -3421,7 +3437,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             />
             {projectGroups.length > 0 ? (
               <SidebarStatusFilterBar
-                counts={statusCounts}
+                counts={sidebarStatusCounts}
                 onChange={() => {
                   clearSelection();
                   scrollSidebarToTop(sidebarContentRef.current);

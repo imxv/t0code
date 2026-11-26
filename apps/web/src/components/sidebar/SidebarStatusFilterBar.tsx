@@ -1,5 +1,5 @@
 import { msg, useGT, useMessages } from "gt-react";
-import { CircleCheckIcon, CircleDashedIcon, HandIcon } from "lucide-react";
+import { CircleCheckIcon, CircleDashedIcon, HandIcon, SquarePenIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
@@ -18,14 +18,18 @@ const SIDEBAR_STATUS_BUCKET_LABEL = {
     $context: "sidebar status filter: threads waiting on the user's approval, answer or fix",
   }),
   done: msg("Done", { $context: "sidebar status filter: finished threads not yet viewed" }),
+  draft: msg("Draft", {
+    $context: "sidebar status filter: threads with a message typed but not sent",
+  }),
 } as const;
 
-// Working and Done reuse their row status icons; Needs you spans several row
+// Working, Done and Draft reuse their row icons; Needs you spans several row
 // states (question, approval, failure), so it takes the raised hand they share.
 const BUCKET_ICON = {
   working: { Icon: CircleDashedIcon, className: "text-info-foreground" },
   attention: { Icon: HandIcon, className: "text-warning-foreground" },
   done: { Icon: CircleCheckIcon, className: "text-success-foreground" },
+  draft: { Icon: SquarePenIcon, className: "text-warning-foreground" },
 } as const;
 
 export function SidebarStatusFilterBar(props: {

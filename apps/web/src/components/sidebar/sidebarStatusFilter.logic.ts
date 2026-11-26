@@ -1,13 +1,19 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 
+import {
+  composerDraftHasUserContent,
+  type ComposerThreadDraftState,
+  type DraftSessionState,
+} from "../../composerDraftStore";
 import {
   hasUnseenSidebarCompletion,
   resolveSidebarRowStatus,
   resolveThreadLastVisitedAt,
 } from "../Sidebar.logic";
 
-export const SIDEBAR_STATUS_BUCKETS = ["working", "attention", "done"] as const;
+export const SIDEBAR_STATUS_BUCKETS = ["working", "attention", "done", "draft"] as const;
 export type SidebarStatusBucket = (typeof SIDEBAR_STATUS_BUCKETS)[number];
 export type SidebarStatusCounts = Readonly<Record<SidebarStatusBucket, number>>;
 
@@ -23,7 +29,7 @@ type SidebarStatusBucketInput = Parameters<typeof resolveSidebarRowStatus>[0] & 
 export function resolveSidebarStatusBucket(
   thread: SidebarStatusBucketInput,
   wokeAt: string | null,
-): SidebarStatusBucket | null {
+): Exclude<SidebarStatusBucket, "draft"> | null {
   const status = resolveSidebarRowStatus(thread);
   switch (status) {
     case "approval":
@@ -59,7 +65,7 @@ export function resolveSidebarThreadShellBucket(
   thread: EnvironmentThreadShell,
   localLastVisitedAt: string | undefined,
   now: string,
-): SidebarStatusBucket | null {
+): Exclude<SidebarStatusBucket, "draft"> | null {
   return resolveSidebarStatusBucket(
     {
       ...thread,
@@ -72,7 +78,7 @@ export function resolveSidebarThreadShellBucket(
 export function countSidebarStatusBuckets(
   buckets: Iterable<SidebarStatusBucket | null>,
 ): SidebarStatusCounts {
-  const counts = { working: 0, attention: 0, done: 0 };
+  const counts = { working: 0, attention: 0, done: 0, draft: 0 };
   for (const bucket of buckets) {
     if (bucket !== null) counts[bucket] += 1;
   }
@@ -80,17 +86,41 @@ export function countSidebarStatusBuckets(
 }
 
 /**
- * Counts pinned and inbox threads, which snoozed and settled ones are not. While
- * filtering, Working shelf rows fold into the inbox, and the open thread stays
- * listed until the user leaves it, so answering a request doesn't drop its row.
+ * Thread keys whose composer holds an unsent draft, the way a thread row reads
+ * its own: under the thread's key, or under the draft it was started from.
+ */
+export function unsentDraftThreadKeys(state: {
+  readonly draftsByThreadKey: Readonly<Record<string, ComposerThreadDraftState>>;
+  readonly draftThreadsByThreadKey: Readonly<
+    Record<string, Pick<DraftSessionState, "environmentId" | "threadId">>
+  >;
+}): string[] {
+  const keys: string[] = [];
+  for (const [draftKey, draft] of Object.entries(state.draftsByThreadKey)) {
+    if (!composerDraftHasUserContent(draft)) continue;
+    const session = state.draftThreadsByThreadKey[draftKey];
+    keys.push(
+      session ? scopedThreadKey(scopeThreadRef(session.environmentId, session.threadId)) : draftKey,
+    );
+  }
+  return keys.toSorted();
+}
+
+/**
+ * Statuses count pinned and inbox threads; Draft counts shelved ones too, as
+ * auto-settle can shelve an unsent draft. Filtered shelves fold into the inbox,
+ * and the open thread stays listed so answering a request keeps its row.
  */
 export function applySidebarStatusFilter<T>(input: {
   readonly buckets: readonly SidebarStatusBucket[];
   readonly pinned: readonly T[];
   readonly active: readonly T[];
   readonly working: readonly T[];
+  /** Snoozed and settled threads, which only Draft lists. */
+  readonly shelved: readonly T[];
   readonly keyOf: (thread: T) => string;
-  readonly bucketOf: (thread: T) => SidebarStatusBucket | null;
+  readonly bucketOf: (thread: T) => Exclude<SidebarStatusBucket, "draft"> | null;
+  readonly hasDraft: (thread: T) => boolean;
   readonly routeKey: string | null;
 }): {
   readonly counts: SidebarStatusCounts;
@@ -101,15 +131,21 @@ export function applySidebarStatusFilter<T>(input: {
     readonly matchingKeys: ReadonlySet<string>;
   } | null;
 } {
-  const bucketByKey = new Map<string, SidebarStatusBucket | null>();
+  const bucketsByKey = new Map<string, SidebarStatusBucket[]>();
   for (const thread of [...input.pinned, ...input.active, ...input.working]) {
-    bucketByKey.set(input.keyOf(thread), input.bucketOf(thread));
+    const bucket = input.bucketOf(thread);
+    const buckets: SidebarStatusBucket[] = bucket === null ? [] : [bucket];
+    if (input.hasDraft(thread)) buckets.push("draft");
+    bucketsByKey.set(input.keyOf(thread), buckets);
   }
-  const counts = countSidebarStatusBuckets(bucketByKey.values());
+  for (const thread of input.shelved) {
+    if (input.hasDraft(thread)) bucketsByKey.set(input.keyOf(thread), ["draft"]);
+  }
+  const counts = countSidebarStatusBuckets([...bucketsByKey.values()].flat());
   if (input.buckets.length === 0) return { counts, filtered: null };
   const matchingKeys = new Set<string>();
-  for (const [key, bucket] of bucketByKey) {
-    if (bucket !== null && input.buckets.includes(bucket)) matchingKeys.add(key);
+  for (const [key, buckets] of bucketsByKey) {
+    if (buckets.some((bucket) => input.buckets.includes(bucket))) matchingKeys.add(key);
   }
   const listed = (thread: T) => {
     const key = input.keyOf(thread);
@@ -119,7 +155,7 @@ export function applySidebarStatusFilter<T>(input: {
     counts,
     filtered: {
       pinned: input.pinned.filter(listed),
-      active: [...input.active, ...input.working].filter(listed),
+      active: [...input.active, ...input.working, ...input.shelved].filter(listed),
       matchingKeys,
     },
   };

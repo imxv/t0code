@@ -21,6 +21,7 @@ const SEARCH_TERMS = {
     "待处理",
   ],
   done: ["filter", "status", "done", "finished", "unread", "completed", "已完成"],
+  draft: ["filter", "status", "draft", "unsent", "composer", "草稿"],
 } as const;
 
 /** Palette actions that set the sidebar status filter, the same as its toggles. */
@@ -32,6 +33,7 @@ export function useCommandPaletteSidebarStatusItems(): CommandPaletteActionItem[
     working: gt("Show working threads in the sidebar"),
     attention: gt("Show threads that need you in the sidebar"),
     done: gt("Show done threads you haven't viewed in the sidebar"),
+    draft: gt("Show threads with unsent drafts in the sidebar"),
   };
   const items: CommandPaletteActionItem[] = SIDEBAR_STATUS_BUCKETS.filter(
     (bucket) => !(buckets.length === 1 && buckets[0] === bucket),

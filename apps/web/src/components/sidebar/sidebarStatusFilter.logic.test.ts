@@ -1,11 +1,13 @@
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { ComposerThreadDraftState } from "../../composerDraftStore";
 import {
   applySidebarStatusFilter,
   countSidebarStatusBuckets,
   nextSidebarStatusFilter,
   resolveSidebarStatusBucket,
+  unsentDraftThreadKeys,
   type SidebarStatusBucket,
 } from "./sidebarStatusFilter.logic";
 
@@ -96,30 +98,92 @@ describe("resolveSidebarStatusBucket", () => {
       working: 2,
       attention: 0,
       done: 1,
+      draft: 0,
     });
   });
 });
 
+describe("unsentDraftThreadKeys", () => {
+  const draft = (prompt: string) => ({ ...emptyDraft, prompt });
+  const emptyDraft: ComposerThreadDraftState = {
+    prompt: "",
+    images: [],
+    files: [],
+    nonPersistedImageIds: [],
+    persistedAttachments: [],
+    terminalContexts: [],
+    previewAnnotations: [],
+    reviewComments: [],
+    threadContexts: [],
+    environmentContexts: [],
+    replyTo: null,
+    modelSelectionByProvider: {},
+    activeProvider: null,
+    runtimeMode: null,
+    interactionMode: null,
+  };
+
+  it("keys typed drafts by thread, including one still under the draft it started as", () => {
+    expect(
+      unsentDraftThreadKeys({
+        draftsByThreadKey: {
+          "env:typed": draft("half a thought"),
+          "env:blank": draft("   "),
+          "draft-1": draft("launching"),
+        },
+        draftThreadsByThreadKey: {
+          "draft-1": {
+            environmentId: EnvironmentId.make("env"),
+            threadId: ThreadId.make("promoted"),
+          },
+        },
+      }),
+    ).toEqual(["env:promoted", "env:typed"]);
+  });
+});
+
 describe("applySidebarStatusFilter", () => {
-  type Row = { readonly key: string; readonly bucket: SidebarStatusBucket | null };
+  type Row = {
+    readonly key: string;
+    readonly bucket: Exclude<SidebarStatusBucket, "draft"> | null;
+    readonly draft?: boolean;
+  };
   const input = {
     pinned: [{ key: "pinned-done", bucket: "done" }] satisfies Row[],
     active: [
       { key: "asks", bucket: "attention" },
       { key: "open", bucket: null },
       { key: "idle", bucket: null },
+      { key: "left-draft", bucket: null, draft: true },
     ] satisfies Row[],
-    working: [{ key: "shelved-run", bucket: "working" }] satisfies Row[],
+    working: [{ key: "shelved-run", bucket: "working", draft: true }] satisfies Row[],
+    shelved: [
+      { key: "settled-draft", bucket: null, draft: true },
+      { key: "snoozed-asks", bucket: "attention" },
+    ] satisfies Row[],
     keyOf: (thread: Row) => thread.key,
     bucketOf: (thread: Row) => thread.bucket,
+    hasDraft: (thread: Row) => thread.draft === true,
     routeKey: "open",
   };
 
   it("lists nothing new without a filter, but still counts", () => {
     expect(applySidebarStatusFilter({ ...input, buckets: [] })).toEqual({
-      counts: { working: 1, attention: 1, done: 1 },
+      counts: { working: 1, attention: 1, done: 1, draft: 3 },
       filtered: null,
     });
+  });
+
+  it("lists a draft under Draft as well as its status, even on a snoozed or settled thread", () => {
+    const drafts = applySidebarStatusFilter({ ...input, buckets: ["draft"] }).filtered;
+    expect(drafts?.active.map((thread) => thread.key)).toEqual([
+      "open",
+      "left-draft",
+      "shelved-run",
+      "settled-draft",
+    ]);
+    const working = applySidebarStatusFilter({ ...input, buckets: ["working"] }).filtered;
+    expect([...(working?.matchingKeys ?? [])]).toEqual(["shelved-run"]);
   });
 
   it("keeps matches and the open thread, folding Working shelf rows into the inbox", () => {
