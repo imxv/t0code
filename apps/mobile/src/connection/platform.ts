@@ -190,10 +190,9 @@ const layerCapabilities = Layer.effectContext(
           bearerToken: Effect.succeedNone,
         }),
       ),
-      // The relay device id already persists in secure storage; analytics only sends its hash.
       Context.add(ClientCapabilities.AnalyticsDevice, {
         enabled: Constants.expoConfig?.extra?.telemetryEnabled === true,
-        id: storage.loadOrCreateAgentAwarenessDeviceId.pipe(Effect.option),
+        id: storage.loadOrCreateAnalyticsDeviceId.pipe(Effect.option),
       }),
       Context.add(
         ClientCapabilities.RelayDeviceIdentity,

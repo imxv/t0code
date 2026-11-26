@@ -14,6 +14,7 @@ import { T, useGT } from "gt-react";
 import { ChevronRightIcon, XIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useNewProject } from "../hooks/useNewProject";
 import { filesystemEnvironment, useFilesystemReadAccess } from "../state/filesystem";
 import { useEnvironmentQuery } from "../state/query";
@@ -61,7 +62,10 @@ export function MultiRepositoryProjectDialog({
   const [selected, setSelected] = useState<ReadonlyMap<string, ProjectTrackedFolder>>(new Map());
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
-  const createProject = useNewProject();
+  const handleNewThread = useNewThreadHandler();
+  const createProject = useNewProject(async (projectRef) => {
+    await handleNewThread(projectRef);
+  });
   const canCreate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
   const access = useFilesystemReadAccess(target.environmentId);
   const requestedPath = getFilesystemBrowsePath(query, target.platform, access.canReadFiles);
