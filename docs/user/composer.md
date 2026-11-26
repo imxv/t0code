@@ -88,7 +88,7 @@ Press `ArrowUp` in an empty composer to cycle backward through earlier prompts i
 
 ## Suggested next prompt
 
-Enable **Settings → Labs → Suggest next prompt** (web and desktop) to show a predicted next message in the empty composer after a Claude or Codex turn completes.
+On web and desktop, the empty composer shows a predicted next message after a Claude or Codex turn completes. Turn it off in **Settings → Labs → Suggest next prompt**.
 
 - Press `Tab` to accept or `Escape` to dismiss.
 - Each suggestion uses one cached request against your plan's usage. Claude skips suggestions on the first turn and near usage limits.
