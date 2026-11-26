@@ -234,7 +234,7 @@ function Panel({
         onAddProjectScript={scriptResult}
         onUpdateProjectScript={scriptResult}
         onDeleteProjectScript={scriptResult}
-        usage={{} as never}
+        usage={{ providers: [] } as never}
       />
     </ChatCanvasContext>
   );
