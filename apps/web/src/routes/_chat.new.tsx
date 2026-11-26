@@ -1,6 +1,7 @@
 import { parseNewThreadLink } from "@t3tools/shared/promptLinksCopy";
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { T, useMessages } from "gt-react";
+import { APP_BASE_NAME } from "../branding";
 import { NewThreadLinkView } from "../components/promptLinks/NewThreadLinkView";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -9,7 +10,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 function NewThreadLinkRoute() {
   const search = useLocation({ select: (location) => location.searchStr });
   const resolve = useMessages();
-  const parsed = parseNewThreadLink(search, resolve);
+  const parsed = parseNewThreadLink(search, resolve, APP_BASE_NAME);
   if (!parsed.ok) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">

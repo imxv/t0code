@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { msg } from "gt-react";
 import { useEffect } from "react";
 
+import { APP_BASE_NAME } from "../../branding";
 import { m } from "../../i18n/messages";
 import { isThreadRoutePathname } from "../../threadRoutes";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -30,7 +31,7 @@ export function ThreadLinkPrompt({ threadRef }: { readonly threadRef: ScopedThre
     if (!new URLSearchParams(location.search).has("prompt")) return;
     if (!handledLinkKeys.has(location.key)) {
       handledLinkKeys.add(location.key);
-      const parsed = parseThreadLinkPrompt(location.search, m);
+      const parsed = parseThreadLinkPrompt(location.search, m, APP_BASE_NAME);
       if (!parsed.ok) {
         toastManager.add(
           stackedThreadToast({
