@@ -16,13 +16,14 @@ import {
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 
-import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
+import type { EnvironmentThreadShell, PendingSubagentRequest, SideChatResult } from "./models.ts";
 import {
   presentThreadShell,
   resolveThreadWorkingStartedAt,
   threadRuntimeIsActive,
 } from "./models.ts";
 import { hiddenThreadKeys, NO_HIDDEN_THREADS } from "./threadTagFilter.ts";
+import { hasUnseenRunCompletion, hasUnseenRunFailure } from "./threadSettled.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import {
   arrayElementsEqual,
@@ -41,7 +42,8 @@ const EMPTY_SIDE_CHATS_BY_PARENT: ReadonlyMap<
   ThreadId,
   ReadonlyArray<OrchestrationV2ThreadShell>
 > = new Map();
-const EMPTY_SIDE_CHAT_ACTIVITY: ReadonlyMap<ThreadId, string | null> = new Map();
+type SideChatActivity = Pick<EnvironmentThreadShell, "workingSideChatStartedAt" | "sideChatResult">;
+const EMPTY_SIDE_CHAT_ACTIVITY: ReadonlyMap<ThreadId, SideChatActivity> = new Map();
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = Object.freeze([]);
 const EMPTY_THREAD_REFS_BY_PROJECT: ReadonlyMap<
   ProjectId,
@@ -234,6 +236,16 @@ export function childThreadInputsTitle(
 
 const sameWireThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
 
+function sameSideChatActivity(
+  left: SideChatActivity | undefined,
+  right: SideChatActivity | undefined,
+) {
+  return (
+    left?.workingSideChatStartedAt === right?.workingSideChatStartedAt &&
+    left?.sideChatResult === right?.sideChatResult
+  );
+}
+
 // While a run streams, the server bumps the shell's timestamps, item counts and
 // latest message several times a second. Only the zero crossing of the counts
 // says anything (whether the thread has started). Once the run stops every
@@ -245,7 +257,7 @@ function sameApartFromStreaming(
   if (
     previous.environmentId !== next.environmentId ||
     previous.pendingSubagentRequest !== next.pendingSubagentRequest ||
-    previous.workingSideChatStartedAt !== next.workingSideChatStartedAt ||
+    !sameSideChatActivity(previous, next) ||
     !threadRuntimeIsActive(next.runtime)
   ) {
     return false;
@@ -288,7 +300,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentId: EnvironmentId,
     thread: OrchestrationV2ThreadShell,
     subagentRequests: ReadonlyMap<ThreadId, PendingSubagentRequest>,
-    workingSideChatStartedAt?: string | null,
+    sideChatActivity?: SideChatActivity,
   ) => {
     let byEnvironment = scopedThreads.get(thread);
     if (byEnvironment === undefined) {
@@ -298,9 +310,9 @@ export function createEnvironmentThreadShellAtoms(input: {
     const request = subagentRequests.get(thread.id) ?? null;
     const key = request === null ? environmentId : `${environmentId}:${request}`;
     let value = byEnvironment.get(key);
-    if (value === undefined || value.workingSideChatStartedAt !== workingSideChatStartedAt) {
+    if (value === undefined || !sameSideChatActivity(value, sideChatActivity)) {
       value = presentThreadShell(environmentId, thread, request);
-      if (workingSideChatStartedAt !== undefined) value = { ...value, workingSideChatStartedAt };
+      if (sideChatActivity !== undefined) value = { ...value, ...sideChatActivity };
       byEnvironment.set(key, value);
     }
     return value;
@@ -348,25 +360,59 @@ export function createEnvironmentThreadShellAtoms(input: {
         previous = EMPTY_SIDE_CHAT_ACTIVITY;
         return previous;
       }
-      const next = new Map<ThreadId, string | null>();
+      const next = new Map<ThreadId, SideChatActivity>();
       for (const [parentId, sideChats] of sideChatsByParent) {
+        let workingSideChatStartedAt: string | null | undefined;
+        let sideChatResult: SideChatResult | undefined;
+        let latestResultAt: string | null = null;
         for (const sideChat of sideChats) {
           if (sideChat.archivedAt !== null || sideChat.deletedAt !== null) continue;
           const shell = scopedThread(environmentId, sideChat, EMPTY_SUBAGENT_REQUESTS);
-          if (!threadRuntimeIsActive(shell.runtime)) continue;
-          const startedAt = resolveThreadWorkingStartedAt(shell);
-          const earliest = next.get(parentId);
-          if (
-            earliest === undefined ||
-            (startedAt !== null && (earliest === null || startedAt < earliest))
-          ) {
-            next.set(parentId, startedAt);
+          if (threadRuntimeIsActive(shell.runtime)) {
+            const startedAt = resolveThreadWorkingStartedAt(shell);
+            if (
+              workingSideChatStartedAt == null ||
+              (startedAt !== null && startedAt < workingSideChatStartedAt)
+            ) {
+              workingSideChatStartedAt = startedAt;
+            }
+            continue;
           }
+          const run = shell.latestRun;
+          if (run === null || shell.runtime?.status === "idle") continue;
+          const result =
+            run.status === "completed" && hasUnseenRunCompletion(shell)
+              ? "done"
+              : run.status === "failed" && shell.runtime?.lastErrorClass === "usage_limit"
+                ? "limited"
+                : hasUnseenRunFailure(shell)
+                  ? "failed"
+                  : undefined;
+          if (result === undefined) continue;
+          if (result === "done" && sideChatResult !== undefined && sideChatResult !== "done")
+            continue;
+          const finishedAt = run.completedAt ?? run.startedAt ?? run.requestedAt ?? shell.updatedAt;
+          if (
+            latestResultAt === null ||
+            (sideChatResult === "done" && result !== "done") ||
+            finishedAt > latestResultAt
+          ) {
+            sideChatResult = result;
+            latestResultAt = finishedAt;
+          }
+        }
+        if (workingSideChatStartedAt !== undefined || sideChatResult !== undefined) {
+          next.set(parentId, {
+            ...(workingSideChatStartedAt === undefined ? {} : { workingSideChatStartedAt }),
+            ...(sideChatResult === undefined ? {} : { sideChatResult }),
+          });
         }
       }
       if (
         previous.size !== next.size ||
-        [...next].some(([parentId, startedAt]) => previous.get(parentId) !== startedAt)
+        [...next].some(
+          ([parentId, activity]) => !sameSideChatActivity(previous.get(parentId), activity),
+        )
       ) {
         previous = next.size === 0 ? EMPTY_SIDE_CHAT_ACTIVITY : next;
       }

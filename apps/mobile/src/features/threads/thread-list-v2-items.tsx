@@ -872,11 +872,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const rawStatus = resolveThreadListV2Status(thread);
   const status = resolveThreadListV2RowStatus(thread);
+  const sideResult = thread.sideChatResult;
   const showStatusInSlim =
     variant === "slim" &&
     !snoozedRow &&
-    status === "working" &&
-    thread.workingSideChatStartedAt !== undefined;
+    ((status === "working" && thread.workingSideChatStartedAt !== undefined) ||
+      (status === "ready" && sideResult === "done") ||
+      status === sideResult);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;

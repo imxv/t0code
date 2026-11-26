@@ -2,7 +2,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import { threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 
 import {
-  hasUnseenCompletion,
+  hasUnseenSidebarCompletion,
   resolveSidebarRowStatus,
   resolveThreadLastVisitedAt,
 } from "../Sidebar.logic";
@@ -42,7 +42,7 @@ export function resolveSidebarStatusBucket(
       break;
   }
   if (isUnacknowledgedWake(thread, wokeAt)) return "attention";
-  return hasUnseenCompletion(thread) ? "done" : null;
+  return hasUnseenSidebarCompletion(thread) ? "done" : null;
 }
 
 function isUnacknowledgedWake(thread: SidebarStatusBucketInput, wokeAt: string | null): boolean {

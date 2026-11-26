@@ -203,6 +203,33 @@ describe("v2 thread shell lists", () => {
     expect(status()).toBeNull();
     setChildren(stopped, { ...other, archivedAt: otherStart });
     expect(status()).toBeUndefined();
+    expect(registry.get(point)?.sideChatResult).toBeUndefined();
+
+    const completed = {
+      ...child,
+      activityRunStatus: null,
+      status: "completed",
+      latestRunCompletedAt: otherStart,
+      lastVisitedAt: v2Now,
+    } as const;
+    setChildren(completed);
+    const finished = registry.get(point)!;
+    expect(finished.latestRun).toBeNull();
+    expect(finished.sideChatResult).toBe("done");
+    expect(registry.get(quiet)).toBe(finished);
+    expect(registry.get(nav)[0]).toBe(finished);
+    const failed = {
+      ...other,
+      activityRunStatus: null,
+      status: "failed",
+      latestRunCompletedAt: v2Now,
+    } as const;
+    setChildren(completed, failed);
+    expect(registry.get(point)?.sideChatResult).toBe("failed");
+    setChildren(completed, { ...failed, lastVisitedAt: otherStart });
+    expect(registry.get(point)?.sideChatResult).toBe("done");
+    setChildren({ ...completed, lastVisitedAt: otherStart });
+    expect(registry.get(point)?.sideChatResult).toBeUndefined();
 
     for (const dispose of disposers) dispose();
     registry.dispose();

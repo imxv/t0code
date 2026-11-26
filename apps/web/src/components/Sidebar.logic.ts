@@ -29,6 +29,7 @@ import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/c
 import type { AsyncResult } from "effect/reactivity";
 import {
   effectiveSnoozed,
+  hasUnseenRunCompletion,
   hasUnseenRunFailure,
   type ThreadSnoozeShell,
 } from "@t3tools/client-runtime/state/thread-settled";
@@ -776,18 +777,12 @@ export function resolveThreadLastVisitedAt(
   return serverLastVisitedAt ?? undefined;
 }
 
-export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
-  if (!thread.latestRun?.completedAt) return false;
-  if (thread.latestRun.status === "interrupted" || thread.latestRun.status === "cancelled") {
-    return false;
-  }
-  const completedAt = Date.parse(thread.latestRun.completedAt);
-  if (Number.isNaN(completedAt)) return false;
-  if (!thread.lastVisitedAt) return false;
+export const hasUnseenCompletion = hasUnseenRunCompletion;
 
-  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
-  if (Number.isNaN(lastVisitedAt)) return true;
-  return completedAt > lastVisitedAt;
+export function hasUnseenSidebarCompletion(
+  thread: ThreadStatusInput & Pick<SidebarThreadSummary, "sideChatResult">,
+): boolean {
+  return thread.sideChatResult === "done" || hasUnseenCompletion(thread);
 }
 
 // Suppress trailing double-click navigation; keyboard and synthetic clicks use detail 0.
@@ -997,7 +992,7 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
 export function resolveSidebarRowStatus(
   thread: ThreadStatusInput &
     SidebarThreadStatusInput &
-    Pick<SidebarThreadSummary, "workingSideChatStartedAt">,
+    Pick<SidebarThreadSummary, "workingSideChatStartedAt" | "sideChatResult">,
 ): SidebarThreadStatus {
   const status = resolveSidebarThreadStatus(thread);
   if (
@@ -1007,8 +1002,11 @@ export function resolveSidebarRowStatus(
     return "working";
   }
   // A runtime failure without a failed run has nothing to date it, so it stays.
-  if (status !== "failed" || thread.latestRun?.status !== "failed") return status;
-  return hasUnseenRunFailure(thread) ? status : "ready";
+  const seenFailure =
+    status === "failed" && thread.latestRun?.status === "failed" && !hasUnseenRunFailure(thread);
+  if (status !== "ready" && !seenFailure) return status;
+  const sideResult = thread.sideChatResult;
+  return sideResult === "failed" || sideResult === "limited" ? sideResult : "ready";
 }
 
 /** What the window title says the open thread is doing, in the words its announcer uses. */
@@ -1052,7 +1050,7 @@ export function resolveSidebarFolderDot(
   if (statuses.has("failed")) return "failed";
   // Rows show Done only for ready threads, so the dot follows the same rule.
   const hasUnread = threads.some(
-    (thread) => resolveSidebarRowStatus(thread) === "ready" && hasUnseenCompletion(thread),
+    (thread) => resolveSidebarRowStatus(thread) === "ready" && hasUnseenSidebarCompletion(thread),
   );
   if (hasUnread) return "unread";
   if (statuses.has("working") || statuses.has("preparing")) return "working";

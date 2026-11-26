@@ -152,6 +152,8 @@ function threadRunStatusIsActive(status: ThreadRuntimeSummary["status"]): boolea
   );
 }
 
+export type SideChatResult = "done" | "failed" | "limited";
+
 export interface EnvironmentThreadShell {
   readonly environmentId: EnvironmentId;
   readonly id: ThreadId;
@@ -182,6 +184,7 @@ export interface EnvironmentThreadShell {
   readonly pendingSubagentRequest?: PendingSubagentRequest | null;
   /** Absent when no side chat is active, null when active without a known start time. */
   readonly workingSideChatStartedAt?: string | null;
+  readonly sideChatResult?: SideChatResult;
   /** Guest messages waiting for the owner to send or dismiss. */
   readonly pendingGuestMessageCount?: number;
   readonly hasActionableProposedPlan: boolean;

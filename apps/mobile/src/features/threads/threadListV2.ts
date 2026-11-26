@@ -10,6 +10,7 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import {
+  hasUnseenRunCompletion,
   hasUnseenRunFailure,
   type SnoozePreset,
 } from "@t3tools/client-runtime/state/thread-settled";
@@ -243,18 +244,9 @@ export const THREAD_LIST_V2_SETTLED_INITIAL_COUNT = 10;
 export const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25;
 
 export function threadHasUnseenCompletion(
-  thread: Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt">,
+  thread: Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt" | "sideChatResult">,
 ): boolean {
-  const completedAt = thread.latestRun?.completedAt;
-  if (!completedAt) return false;
-  const status = thread.latestRun?.status;
-  if (status === "interrupted" || status === "cancelled") return false;
-  const completedAtMs = Date.parse(completedAt);
-  if (Number.isNaN(completedAtMs)) return false;
-  if (!thread.lastVisitedAt) return false;
-  const lastVisitedAtMs = Date.parse(thread.lastVisitedAt);
-  if (Number.isNaN(lastVisitedAtMs)) return true;
-  return completedAtMs > lastVisitedAtMs;
+  return thread.sideChatResult === "done" || hasUnseenRunCompletion(thread);
 }
 
 export function resolveThreadListV2WokeAt(
@@ -346,7 +338,10 @@ export function threadListV2RowAccessibilityLabel(
 /** Row status: a failure the user has already opened settles to ready, like Done. */
 export function resolveThreadListV2RowStatus(
   thread: Parameters<typeof resolveThreadListV2Status>[0] &
-    Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt" | "workingSideChatStartedAt">,
+    Pick<
+      EnvironmentThreadShell,
+      "latestRun" | "lastVisitedAt" | "workingSideChatStartedAt" | "sideChatResult"
+    >,
 ): ThreadListV2Status {
   const status = resolveThreadListV2Status(thread);
   if (
@@ -356,8 +351,11 @@ export function resolveThreadListV2RowStatus(
     return "working";
   }
   // A runtime failure without a failed run has nothing to date it, so it stays.
-  if (status !== "failed" || thread.latestRun?.status !== "failed") return status;
-  return hasUnseenRunFailure(thread) ? status : "ready";
+  const seenFailure =
+    status === "failed" && thread.latestRun?.status === "failed" && !hasUnseenRunFailure(thread);
+  if (status !== "ready" && !seenFailure) return status;
+  const sideResult = thread.sideChatResult;
+  return sideResult === "failed" || sideResult === "limited" ? sideResult : "ready";
 }
 
 function parseTimestampMs(isoDate: string): number {

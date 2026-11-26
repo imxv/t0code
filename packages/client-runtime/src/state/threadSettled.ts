@@ -469,6 +469,20 @@ export function isThreadWokeUnseen(input: {
   return seenAt.every((ms) => ms < wokeAtMs);
 }
 
+export function hasUnseenRunCompletion(
+  thread: Pick<EnvironmentThreadShell, "latestRun"> & {
+    readonly lastVisitedAt?: string | null | undefined;
+  },
+): boolean {
+  const run = thread.latestRun;
+  if (!run?.completedAt || !thread.lastVisitedAt) return false;
+  if (run.status === "interrupted" || run.status === "cancelled") return false;
+  const completedAt = Date.parse(run.completedAt);
+  if (Number.isNaN(completedAt)) return false;
+  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
+  return Number.isNaN(lastVisitedAt) || completedAt > lastVisitedAt;
+}
+
 /**
  * Whether the latest run failed after the user last saw the thread. Only the run dates the
  * failure, since the shell's updatedAt also moves on renames. A failed run without a

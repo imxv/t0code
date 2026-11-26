@@ -97,7 +97,7 @@ import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   animateSidebarLayoutChanges,
-  hasUnseenCompletion,
+  hasUnseenSidebarCompletion,
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
   resolveSidebarRowStatus,
@@ -804,10 +804,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
     : null;
 
-  const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarRowStatus({ ...thread, lastVisitedAt });
-  const showsSideChatWorking =
-    status === "working" && thread.workingSideChatStartedAt !== undefined;
+  const rowThread = { ...thread, lastVisitedAt };
+  const status = resolveSidebarRowStatus(rowThread);
+  const isUnread = hasUnseenSidebarCompletion(rowThread);
+  const sideResult = thread.sideChatResult;
+  const showsSideChatStatus =
+    (status === "working" && thread.workingSideChatStartedAt !== undefined) ||
+    (status === "ready" && sideResult === "done") ||
+    status === sideResult;
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1458,7 +1462,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         </>
                       }
                     />
-                  ) : (inFolder || showsSideChatWorking) && topStatus ? (
+                  ) : (inFolder || showsSideChatStatus) && topStatus ? (
                     // Compact rows have no status line, so the status takes the time slot.
                     <span
                       className={cn(
