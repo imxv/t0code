@@ -265,6 +265,7 @@ import {
 } from "./CommandPaletteThreadItems";
 import { useCommandPaletteSettingsItems } from "./CommandPaletteSettingsItems";
 import { useCommandPaletteThemeItems } from "./CommandPaletteThemeItems";
+import { useCommandPaletteSidebarStatusItems } from "./CommandPaletteSidebarStatusItems";
 import {
   PORT_FORWARD_GROUP_PREFIX,
   useCommandPalettePortForwardItem,
@@ -587,6 +588,7 @@ function OpenCommandPaletteDialog(props: {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providersByEnvironment = useEnvironmentProviders();
   const { changeThemeItem, changeAppearanceItem, themeEditorItem } = useCommandPaletteThemeItems();
+  const sidebarStatusItems = useCommandPaletteSidebarStatusItems();
   const portForwardItem = useCommandPalettePortForwardItem({
     activeThread: activeThread ?? null,
     query: deferredQuery,
@@ -1761,6 +1763,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(...sidebarStatusItems);
   actionItems.push(changeThemeItem);
   actionItems.push(changeAppearanceItem);
 
