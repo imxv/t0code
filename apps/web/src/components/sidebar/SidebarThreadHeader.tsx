@@ -10,6 +10,7 @@ import {
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
 import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
@@ -29,6 +30,8 @@ export interface SidebarThreadHeaderProps {
   searchResultCount: number;
   activeSearchResultIndex: number;
   onClearSearch: () => void;
+  commandPaletteShortcutLabel: string | null;
+  onOpenCommandPalette: () => void;
 }
 
 export function SidebarThreadHeader({
@@ -47,6 +50,8 @@ export function SidebarThreadHeader({
   searchResultCount,
   activeSearchResultIndex,
   onClearSearch,
+  commandPaletteShortcutLabel,
+  onOpenCommandPalette,
 }: SidebarThreadHeaderProps) {
   const gt = useGT();
   const resultsVisible = isSearching && searchResultCount > 0;
@@ -94,6 +99,20 @@ export function SidebarThreadHeader({
           >
             <XIcon className="size-3" />
           </Button>
+        ) : commandPaletteShortcutLabel ? (
+          <SharedTooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label={gt("Command palette")}
+                className="shrink-0 rounded outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring pointer-coarse:hidden"
+                onClick={onOpenCommandPalette}
+              />
+            }
+            label={gt("Command palette")}
+          >
+            <Kbd variant="outline">{commandPaletteShortcutLabel}</Kbd>
+          </SharedTooltipTrigger>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center">

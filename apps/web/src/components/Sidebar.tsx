@@ -3434,6 +3434,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               searchResultCount={threadSearchResults.length}
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
+              commandPaletteShortcutLabel={shortcutLabelForCommand(
+                keybindings,
+                "commandPalette.toggle",
+              )}
+              onOpenCommandPalette={() => openCommandPalette()}
             />
             {projectGroups.length > 0 ? (
               <SidebarStatusFilterBar
