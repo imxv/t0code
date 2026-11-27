@@ -2,18 +2,26 @@ name: Release T0 Code
 
 # Builds the T0 Code fork for Apple silicon, signs it with an Apple Development
 # certificate, and publishes it as a GitHub release that installed copies
-# auto-update from. Upstream's release.yml skips every job outside
-# pingdotgg/t3code, so both can share the v*.*.* tags.
+# auto-update from.
+#
+# Every push to main releases main as the next patch version, and the workflow
+# makes the tag itself. The concurrency group keeps one run building and only
+# the newest one waiting, and a waiting run releases main as it is when it
+# starts, so a burst of pushes ships as at most two releases.
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".github/**"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish, for example 0.2.0 (tagged v0.2.0)"
-        required: true
+        description: "Version to publish, for example 0.3.0. Leave empty for the next patch."
+        required: false
         type: string
 
 permissions:
@@ -24,40 +32,96 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  macos-arm64:
-    name: Build and publish macOS arm64
+  plan:
+    name: Pick commit and version
     if: github.repository == 'imxv/t0code'
-    runs-on: macos-26
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
     steps:
-      - name: Resolve version
-        id: version
+      - name: Pick commit and version
+        id: plan
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
+          sha="$(git ls-remote "$REPO_URL" refs/heads/main | cut -f1)"
+          test -n "$sha"
+          # "<version> <commit>" per vX.Y.Z tag, lowest first. Annotated tags name their commit on the ^{} line.
+          tags="$(git ls-remote --tags "$REPO_URL" | awk '
+            {
+              ref = $2; sub("^refs/tags/", "", ref); peeled = 0
+              if (substr(ref, length(ref) - 2) == "^{}") { ref = substr(ref, 1, length(ref) - 3); peeled = 1 }
+            }
+            ref ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && (peeled || !(ref in commit)) { commit[ref] = $1 }
+            END { for (ref in commit) print substr(ref, 2), commit[ref] }
+          ' | sort -t. -k1,1n -k2,2n -k3,3n)"
+          latest=""
+          tagged=""
+          while read -r tag_version tag_commit; do
+            if [[ -z "$tag_version" ]]; then continue; fi
+            latest="$tag_version"
+            if [[ "$tag_commit" == "$sha" ]]; then tagged="$tag_version"; fi
+          done <<< "$tags"
+
+          if [[ -n "$INPUT_VERSION" ]]; then
             version="${INPUT_VERSION#v}"
+          elif [[ -n "$tagged" ]]; then
+            version="$tagged"
+          elif [[ -n "$latest" ]]; then
+            IFS=. read -r major minor patch <<< "$latest"
+            version="$major.$minor.$((patch + 1))"
+          else
+            echo "::error::No vX.Y.Z tag yet. Run this workflow with a version."
+            exit 1
           fi
           if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Version must look like 1.2.3, got '$version'."
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          existing="$(awk -v v="$version" '$1 == v { print $2 }' <<< "$tags")"
+          if [[ -n "$existing" && "$existing" != "$sha" ]]; then
+            echo "::error::v$version already tags $existing, not main ($sha)."
+            exit 1
+          fi
 
+          publish=true
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Fxq latest-mac.yml; then
+            echo "v$version already ships main ($sha). Nothing to release."
+            publish=false
+          else
+            echo "Releasing main ($sha) as v$version."
+          fi
+          {
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+  macos-arm64:
+    name: Build and publish macOS arm64
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
       # Same checkout as release-desktop.yml: skip the vendored .repos tree.
       - name: Checkout
         shell: bash
         env:
           GIT_TERMINAL_PROMPT: "0"
+          SHA: ${{ needs.plan.outputs.sha }}
         run: |
           set -euo pipefail
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git fetch --no-tags --depth=1 origin "$SHA"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git -c checkout.workers=0 checkout --detach FETCH_HEAD
 
@@ -117,7 +181,7 @@ jobs:
           T3CODE_RELAY_URL: https://relay.t3.codes
           T3CODE_DESKTOP_LOCAL_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
           T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           vp run dist:desktop:artifact \
             --platform mac --target dmg --arch arm64 \
@@ -137,7 +201,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
           artifact="T0-Code-$VERSION-arm64"
@@ -157,7 +222,7 @@ jobs:
           else
             gh release create "v$VERSION" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "$SHA" \
               --title "T0 Code $VERSION" \
               --notes "T0 Code $VERSION for macOS (Apple silicon). Unofficial fork of T3 Code." \
               --latest
