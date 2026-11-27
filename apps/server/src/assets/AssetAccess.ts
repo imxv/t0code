@@ -22,6 +22,7 @@ import {
 import {
   hostPreviewMimeTypeFromExtension,
   isWorkspaceAudioPreviewPath,
+  isWorkspaceImagePreviewPath,
   isWorkspacePreviewEntryPath,
   isWorkspaceVideoPreviewPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
@@ -404,14 +405,24 @@ const readImageDimensionsFromOpenFile = (filePath: string, file: OpenMediaFile) 
   );
 
 // Non-blocking open prevents swapped-in FIFOs from hanging the request.
-const readImageDimensionsFromHeader = (filePath: string) =>
+const readImageMetadata = (filePath: string, wantsDimensions: boolean) =>
   openMediaFile(filePath).pipe(
     Effect.flatMap((file) =>
-      file === null ? Effect.succeed(null) : readImageDimensionsFromOpenFile(filePath, file),
+      file === null
+        ? Effect.succeed(null)
+        : Effect.map(
+            wantsDimensions
+              ? readImageDimensionsFromOpenFile(filePath, file)
+              : Effect.succeed(null),
+            (imageDimensions) => ({ imageDimensions, fileRevision: mediaFileRevision(file.info) }),
+          ),
     ),
     Effect.scoped,
-    Effect.orElseSucceed((): ImageDimensions | null => null),
+    Effect.orElseSucceed(() => null),
   );
+
+const readImageDimensionsFromHeader = (filePath: string) =>
+  readImageMetadata(filePath, true).pipe(Effect.map((image) => image?.imageDimensions ?? null));
 
 const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMediaFileAsset")(
   function* (input: {
@@ -575,12 +586,13 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
           }),
       ),
     );
-    const imageDimensions = HEADER_IMAGE_EXTENSIONS.has(
-      path.extname(resolved.relativePath).toLowerCase(),
-    )
-      ? yield* readImageDimensionsFromHeader(canonicalFile)
-      : null;
     if (!/\.html?$/i.test(resolved.relativePath)) {
+      const image = isWorkspaceImagePreviewPath(resolved.relativePath)
+        ? yield* readImageMetadata(
+            canonicalFile,
+            HEADER_IMAGE_EXTENSIONS.has(path.extname(resolved.relativePath).toLowerCase()),
+          )
+        : null;
       return {
         claims: {
           version: 1 as const,
@@ -590,8 +602,8 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
           expiresAt: input.expiresAt,
         },
         fileName: path.basename(resolved.relativePath),
-        imageDimensions,
-        fileRevision: undefined,
+        imageDimensions: image?.imageDimensions ?? null,
+        fileRevision: image?.fileRevision,
       };
     }
     const revisions = yield* WorkspacePreviewRevisions.WorkspacePreviewRevisions;
@@ -605,7 +617,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
         expiresAt: input.expiresAt,
       },
       fileName: path.basename(resolved.relativePath),
-      imageDimensions,
+      imageDimensions: null,
       fileRevision: yield* revisions.revision({
         workspaceRoot: canonicalWorkspaceRoot,
         entryRelativePath: resolved.relativePath,

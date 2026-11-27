@@ -1075,6 +1075,49 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("versions a workspace image independently of other files", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const imagePath = path.join(root, "image.png");
+      yield* fs.writeFile(imagePath, screenshotPng);
+      yield* Effect.promise(() => NodeFSP.utimes(imagePath, 1_000, 1_000));
+      const input = {
+        resource: {
+          _tag: "workspace-file" as const,
+          threadId: ThreadId.make("thread-1"),
+          path: imagePath,
+        },
+        workspaceRoot: root,
+      };
+      const original = yield* issueAssetUrl(input);
+      expect(original.fileRevision).toEqual(expect.any(String));
+      expect(original.imageDimensions).toEqual({ width: 390, height: 844 });
+
+      yield* fs.writeFileString(path.join(root, "other.txt"), "changed");
+      yield* TestClock.adjust("1 minute");
+      const renewed = yield* issueAssetUrl(input);
+      expect(renewed.relativeUrl).not.toBe(original.relativeUrl);
+      expect(renewed.fileRevision).toBe(original.fileRevision);
+
+      const editedPng = screenshotPng.slice();
+      new DataView(editedPng.buffer).setUint32(16, 400);
+      yield* fs.writeFile(imagePath, editedPng);
+      yield* Effect.promise(() => NodeFSP.utimes(imagePath, 2_000, 2_000));
+      const edited = yield* issueAssetUrl(input);
+      expect(edited.fileRevision).not.toBe(renewed.fileRevision);
+      expect(edited.imageDimensions).toEqual({ width: 400, height: 844 });
+
+      const replacement = path.join(root, "replacement.png");
+      yield* fs.writeFile(replacement, editedPng);
+      yield* Effect.promise(() => NodeFSP.utimes(replacement, 2_000, 2_000));
+      yield* fs.rename(replacement, imagePath);
+      const replaced = yield* issueAssetUrl(input);
+      expect(replaced.fileRevision).not.toBe(edited.fileRevision);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("keeps in-place edits readable but requires a new URL after atomic replacement", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

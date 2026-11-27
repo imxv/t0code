@@ -10,17 +10,21 @@ export default function PreviewImageContent(props: {
   readonly src: string;
   readonly name: string;
   readonly mimeType?: string;
+  readonly refreshPending?: boolean;
   readonly onError?: () => void;
 }) {
   const gt = useGT();
-  const [failed, setFailed] = useState(false);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [natural, setNatural] = useState({ width: 0, height: 0 });
+  const [shown, setShown] = useState<{ src: string; width: number; height: number } | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const requestedSrc = props.refreshPending && shown !== null ? shown.src : props.src;
+  const failed = shown === null && failedSrc === requestedSrc;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Measure the image viewport before paint and observe resizes to keep fit-to-view scaling accurate.
   useLayoutEffect(() => {
+    if (failed) return;
     const node = ref.current;
     if (!node) return;
     // clientWidth rounds a fractional pane size up, and an image fitted to it overflows the pane.
@@ -34,29 +38,35 @@ export default function PreviewImageContent(props: {
     };
     update();
     return observeResize(node, update);
-  }, []);
-  const fit = natural.width
+  }, [failed]);
+  const sources =
+    shown === null || shown.src === requestedSrc || failedSrc === requestedSrc
+      ? [shown?.src ?? requestedSrc]
+      : [shown.src, requestedSrc];
+  const fit = shown
     ? Math.min(
         1,
-        Math.max(1, viewport.width - 32) / natural.width,
-        Math.max(1, viewport.height - 32) / natural.height,
+        Math.max(1, viewport.width - 32) / shown.width,
+        Math.max(1, viewport.height - 32) / shown.height,
       )
     : 1;
   const scale = zoom ?? fit;
   const changeZoom = (factor: number) => setZoom(Math.max(0.05, Math.min(8, scale * factor)));
-  if (failed) return <FileSurfaceFailure message={gt("Unable to load image.")} />;
+  if (failed) {
+    return <FileSurfaceFailure message={gt("Unable to load image.")} />;
+  }
   return (
     <>
       <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-1 text-xs text-muted-foreground">
         <span className="tabular-nums">
-          {natural.width
-            ? `${natural.width.toLocaleString()} × ${natural.height.toLocaleString()}`
+          {shown
+            ? `${shown.width.toLocaleString()} × ${shown.height.toLocaleString()}`
             : gt("Loading image…")}
         </span>
         <div className="flex items-center gap-1">
           <FileSurfaceAction
             label={gt("Zoom out")}
-            disabled={!natural.width || scale <= 0.05}
+            disabled={shown === null || scale <= 0.05}
             onPress={() => changeZoom(1 / 1.25)}
           >
             <MinusIcon className="size-3.5" />
@@ -64,7 +74,7 @@ export default function PreviewImageContent(props: {
           <span className="min-w-10 text-center tabular-nums">{Math.round(scale * 100)}%</span>
           <FileSurfaceAction
             label={gt("Zoom in")}
-            disabled={!natural.width || scale >= 8}
+            disabled={shown === null || scale >= 8}
             onPress={() => changeZoom(1.25)}
           >
             <PlusIcon className="size-3.5" />
@@ -89,40 +99,48 @@ export default function PreviewImageContent(props: {
         <div
           className="flex min-h-full min-w-full items-center justify-center p-4"
           style={{
-            width: natural.width ? natural.width * scale + 32 : undefined,
-            height: natural.height ? natural.height * scale + 32 : undefined,
+            width: shown ? shown.width * scale + 32 : undefined,
+            height: shown ? shown.height * scale + 32 : undefined,
           }}
         >
           <button
             type="button"
             aria-label={gt("Zoom {name}", { name: props.name })}
-            className="shrink-0 cursor-zoom-in"
+            className="relative shrink-0 cursor-zoom-in"
             onClick={() => setExpanded(true)}
           >
-            <AttachmentImage
-              name={props.name}
-              mimeType={props.mimeType}
-              src={props.src}
-              alt={props.name}
-              className="block max-w-none"
-              // A cached image has its natural size before onLoad runs, so it stays at 0x0 until the
-              // fit scale is known instead of painting at full size for a frame.
-              style={
-                natural.width
-                  ? { width: natural.width * scale, height: natural.height * scale }
-                  : { width: 0, height: 0 }
-              }
-              onLoad={(event) =>
-                setNatural({
-                  width: event.currentTarget.naturalWidth,
-                  height: event.currentTarget.naturalHeight,
-                })
-              }
-              onError={() => {
-                setFailed(true);
-                props.onError?.();
-              }}
-            />
+            {sources.map((src) => {
+              const visible = shown?.src === src;
+              return (
+                <AttachmentImage
+                  key={src}
+                  name={props.name}
+                  mimeType={props.mimeType}
+                  src={src}
+                  alt={props.name}
+                  aria-hidden={!visible}
+                  className={
+                    visible ? "block max-w-none" : "pointer-events-none invisible absolute"
+                  }
+                  style={{
+                    width: visible ? shown.width * scale : 0,
+                    height: visible ? shown.height * scale : 0,
+                  }}
+                  onLoad={async ({ currentTarget: image }) => {
+                    if (src !== requestedSrc) return;
+                    const loadedSrc = image.currentSrc;
+                    await image.decode().catch(() => undefined);
+                    if (!image.isConnected || image.currentSrc !== loadedSrc) return;
+                    setShown({ src, width: image.naturalWidth, height: image.naturalHeight });
+                  }}
+                  onError={() => {
+                    if (src !== requestedSrc) return;
+                    setFailedSrc(src);
+                    props.onError?.();
+                  }}
+                />
+              );
+            })}
           </button>
         </div>
       </div>
@@ -131,7 +149,7 @@ export default function PreviewImageContent(props: {
           preview={{
             images: [
               {
-                src: props.src,
+                src: shown?.src ?? requestedSrc,
                 name: props.name,
                 ...(props.mimeType ? { mimeType: props.mimeType } : {}),
               },

@@ -1,15 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 
 import { FileSurfaceLoading } from "./fileSurfaceChrome";
 
 const PreviewImageContent = lazy(() => import("./PreviewImageContent"));
 
-export function PreviewImage(props: {
-  readonly src: string;
-  readonly name: string;
-  readonly mimeType?: string;
-  readonly onError?: () => void;
-}) {
+export function PreviewImage(props: ComponentProps<typeof PreviewImageContent>) {
   return (
     <Suspense fallback={<FileSurfaceLoading />}>
       <PreviewImageContent {...props} />

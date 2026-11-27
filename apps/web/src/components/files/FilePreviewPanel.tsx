@@ -205,11 +205,13 @@ function WorkspaceImagePreview(props: {
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(props.environmentId, resource);
+  const assetUrl = useAssetUrlState(props.environmentId, resource, props.workspaceMutationId);
+  const fileRevision = assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
+  const revision = fileRevision ?? props.workspaceMutationId;
   const revisionSuffix =
-    props.workspaceMutationId === null
+    revision === null
       ? ""
-      : `${assetUrl._tag === "Success" && assetUrl.url.includes("?") ? "&" : "?"}workspace-revision=${encodeURIComponent(props.workspaceMutationId)}`;
+      : `${assetUrl._tag === "Success" && assetUrl.url.includes("?") ? "&" : "?"}${fileRevision === undefined ? "workspace" : "file"}-revision=${encodeURIComponent(revision)}`;
   const imageUrl = assetUrl._tag === "Success" ? `${assetUrl.url}${revisionSuffix}` : null;
   const actionsSource: MediaActionSource = {
     kind: "image",
@@ -232,7 +234,11 @@ function WorkspaceImagePreview(props: {
   return assetUrl._tag === "Success" && imageUrl !== null ? (
     <MediaActions source={actionsSource}>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <PreviewImage key={imageUrl} src={imageUrl} name={props.alt} />
+        <PreviewImage
+          src={imageUrl}
+          name={props.alt}
+          refreshPending={fileRevision === undefined && assetUrl.waiting === true}
+        />
       </div>
     </MediaActions>
   ) : (
@@ -1784,7 +1790,7 @@ export default function FilePreviewPanel({
             />
           ) : relativePath && isImage && absolutePath ? (
             <WorkspaceImagePreview
-              key={absolutePath}
+              key={`${environmentId}:${threadRef.threadId}:${draft}:${absolutePath}`}
               environmentId={environmentId}
               threadRef={threadRef}
               draft={draft}
